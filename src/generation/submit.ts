@@ -1,6 +1,6 @@
 /**
- * 发起生成：先按模型的 schema 完成校验，再落记录（版本壳为生成中），最后上传文件、
- * 向 kie 下单并回填任务编号。下单失败的版本直接标失败，可重试。
+ * 发起生成：按模型的 schema 校验，上传文件并向 kie 下单，拿到任务编号后才写进记录。
+ * 记录里生成中的版本因此都有任务编号；下单失败直接报错，不留下版本。
  */
 import { randomUUID } from 'node:crypto'
 import {
@@ -39,15 +39,9 @@ import {
   readAsset,
   updateAsset,
 } from '../library/record'
-import type {
-  AssetRecord,
-  GenerationRecord,
-  ReferenceRecord,
-} from '../library/record'
+import type { AssetRecord, ReferenceRecord } from '../library/record'
 import { nextGenerationId, nextVersionNumber } from '../library/rules'
 import { findOwningAsset } from '../library/scan'
-
-import { failVersion } from './state'
 
 export type SubmitDeps = {
   upload: (file: string) => Promise<string>
@@ -77,29 +71,65 @@ type Plan = {
   tasks: number
 }
 
-/** 新建素材并发起第一次生成；返回新版本号。 */
+/** kie 接受的任务。并列任务部分下单失败时，errors 是失败原因（成功的照常建版本）。 */
+type Orders = {
+  request: KieTaskRequest
+  taskIds: string[]
+  errors: string[]
+}
+
+/** 发起生成的结果：新版本号，以及部分下单失败时的原因。 */
+export type Submission = {
+  versions: number[]
+  errors: string[]
+}
+
+/** 新建素材并发起第一次生成；新素材的当前版本取版本号最靠前的版本。 */
 export async function createAsset(
   project: ProjectContext,
   location: AssetLocation,
   options: GenerateOptions,
   deps: SubmitDeps = defaultDeps,
-): Promise<number[]> {
+): Promise<Submission> {
   const plan = await planGeneration(options, null)
+  const references = await inspectReferences(project.root, plan.input)
 
   await claimAssetDir(project, location)
 
-  let created: Awaited<ReturnType<typeof writeNewAsset>>
-
   try {
-    created = await writeNewAsset(project, location, plan)
+    const orders = await placeOrders(
+      plan.model.model,
+      plan.input,
+      null,
+      plan.tasks,
+      deps,
+    )
+    const record: AssetRecord = {
+      schema: 1,
+      id: randomUUID(),
+      kind: plan.model.kind,
+      currentVersion: 0,
+      createdAt: now(),
+      generations: [],
+      versions: [],
+    }
+    const id = nextGenerationId(record.generations)
+    const copied = await copyReferences(location.dir, id, references)
+    const versions = appendGeneration(record, id, plan, copied, orders)
+
+    record.currentVersion = versions[0]!
+
+    await writeFile(
+      assetFile(location.dir),
+      `${JSON.stringify(record, null, 2)}\n`,
+      { flag: 'wx' },
+    )
+
+    return { versions, errors: orders.errors }
   } catch (error) {
     await rm(location.dir, { recursive: true, force: true })
     throw error
   }
-
-  await dispatch(location.dir, created.generation, created.versions, deps)
-
-  return created.versions
 }
 
 /**
@@ -111,7 +141,7 @@ export async function generateInAsset(
   location: AssetLocation,
   options: GenerateOptions & { from?: number },
   deps: SubmitDeps = defaultDeps,
-): Promise<number[]> {
+): Promise<Submission> {
   const record = await readAsset(location.dir)
   let plan: Plan
 
@@ -148,7 +178,7 @@ export async function editVersion(
   sourceVersion: number,
   options: GenerateOptions,
   deps: SubmitDeps = defaultDeps,
-): Promise<number[]> {
+): Promise<Submission> {
   const record = await readAsset(location.dir)
   const source = findVersion(record, sourceVersion)
 
@@ -167,12 +197,12 @@ export async function editVersion(
   return appendAndDispatch(project, location, record, plan, deps)
 }
 
-/** 原地重试失败的版本：沿用它那次生成的输入发一个新任务，版本号不变。 */
+/** 原地重试失败的版本：沿用它那次生成的输入下一个新任务，下单成功后版本才回到生成中。 */
 export async function retryVersion(
   location: AssetLocation,
   number: number,
   deps: SubmitDeps = defaultDeps,
-): Promise<number[]> {
+): Promise<Submission> {
   const record = await readAsset(location.dir)
   const version = findVersion(record, number)
   const generation = findGeneration(record, version.generation)
@@ -185,21 +215,28 @@ export async function retryVersion(
     throw new CliError(`v${number} 不是生成产物，无法重试`)
   }
 
+  const orders = await placeOrders(
+    generation.model,
+    absoluteTemplate(location.dir, generation.input),
+    sourceFile(location, record, generation.sourceVersion),
+    1,
+    deps,
+  )
+
   await updateAsset(location.dir, (latest) => {
     Object.assign(findVersion(latest, number), {
       state: 'generating',
       resultIndex: 0,
-      failReason: null,
-      taskId: null,
-      kieRequest: null,
+      taskId: orders.taskIds[0],
+      kieRequest: orders.request,
       kieRecord: null,
+      failReason: null,
       credits: null,
       updatedAt: now(),
     })
   })
-  await dispatch(location.dir, generation, [number], deps)
 
-  return [number]
+  return { versions: [number], errors: [] }
 }
 
 /**
@@ -279,7 +316,7 @@ async function appendAndDispatch(
   record: AssetRecord,
   plan: Plan,
   deps: SubmitDeps,
-): Promise<number[]> {
+): Promise<Submission> {
   if (plan.model.kind !== record.kind) {
     throw new CliError(
       `模型 ${plan.model.model} 生成 ${plan.model.kind}，与素材类型 ${record.kind} 不符`,
@@ -287,50 +324,33 @@ async function appendAndDispatch(
   }
 
   const references = await inspectReferences(project.root, plan.input)
-  const { generation, versions } = await updateAsset(
-    location.dir,
-    async (latest) => {
-      const id = nextGenerationId(latest.generations)
-      const copied = await copyReferences(location.dir, id, references)
-
-      return appendGeneration(latest, id, plan, copied)
-    },
+  const orders = await placeOrders(
+    plan.model.model,
+    plan.input,
+    sourceFile(location, record, plan.sourceVersion),
+    plan.tasks,
+    deps,
   )
+  const versions = await updateAsset(location.dir, async (latest) => {
+    const id = nextGenerationId(latest.generations)
+    const copied = await copyReferences(location.dir, id, references)
 
-  await dispatch(location.dir, generation, versions, deps)
+    return appendGeneration(latest, id, plan, copied, orders)
+  })
 
-  return versions
+  return { versions, errors: orders.errors }
 }
 
-/** 写入新素材的记录与参考输入副本；新素材的当前版本取版本号最靠前的版本壳。 */
-async function writeNewAsset(
-  project: ProjectContext,
+/** 源版本产物的绝对路径；没有源版本时为 null。 */
+function sourceFile(
   location: AssetLocation,
-  plan: Plan,
-) {
-  const references = await inspectReferences(project.root, plan.input)
-  const record: AssetRecord = {
-    schema: 1,
-    id: randomUUID(),
-    kind: plan.model.kind,
-    currentVersion: 0,
-    createdAt: now(),
-    generations: [],
-    versions: [],
-  }
-  const id = nextGenerationId(record.generations)
-  const copied = await copyReferences(location.dir, id, references)
-  const appended = appendGeneration(record, id, plan, copied)
+  record: AssetRecord,
+  sourceVersion: number | null,
+): string | null {
+  const file =
+    sourceVersion == null ? null : findVersion(record, sourceVersion).file
 
-  record.currentVersion = appended.versions[0]!
-
-  await writeFile(
-    assetFile(location.dir),
-    `${JSON.stringify(record, null, 2)}\n`,
-    { flag: 'wx' },
-  )
-
-  return appended
+  return file ? path.join(location.dir, file) : null
 }
 
 type ReferenceInput = Omit<ReferenceRecord, 'file'> & { path: string }
@@ -415,36 +435,20 @@ async function copyReferences(
   return records
 }
 
-/** 追加一次生成与它的版本壳（每个任务一个，就地修改 record）；返回新版本号。 */
+/** 追加一次生成与它的版本（每个 kie 接受的任务一个，就地修改 record）；返回新版本号。 */
 function appendGeneration(
   record: AssetRecord,
   id: number,
   plan: Plan,
   references: CopiedReference[],
-): { generation: GenerationRecord; versions: number[] } {
+  orders: Orders,
+): number[] {
   const timestamp = now()
   const copies = new Map(
     references.map((reference) => [reference.source, reference.file]),
   )
-  const generation: GenerationRecord = {
-    id,
-    model: plan.model.model,
-    // 模板里的文件改成相对素材文件夹的副本路径。
-    input: mapStrings(plan.input, (text) =>
-      isLocalFile(text) && copies.has(text.slice(1))
-        ? `@${copies.get(text.slice(1))}`
-        : text,
-    ) as Record<string, unknown>,
-    references: references.map(
-      ({ source: _source, ...reference }) => reference,
-    ),
-    sourceVersion: plan.sourceVersion,
-    createdAt: timestamp,
-  }
   const base = nextVersionNumber(record.versions)
-  const versions: number[] = []
-
-  for (let position = 0; position < plan.tasks; position++) {
+  const versions = orders.taskIds.map((taskId, position) => {
     const number = base + position
 
     record.versions.push({
@@ -455,8 +459,8 @@ function appendGeneration(
       position,
       resultIndex: 0,
       sourceVersion: plan.sourceVersion,
-      taskId: null,
-      kieRequest: null,
+      taskId,
+      kieRequest: orders.request,
       kieRecord: null,
       failReason: null,
       credits: null,
@@ -470,101 +474,80 @@ function appendGeneration(
       createdAt: timestamp,
       updatedAt: timestamp,
     })
-    versions.push(number)
-  }
 
-  record.generations.push(generation)
+    return number
+  })
 
-  return { generation, versions }
+  record.generations.push({
+    id,
+    model: plan.model.model,
+    // 模板里的文件改成相对素材文件夹的副本路径。
+    input: mapStrings(plan.input, (text) =>
+      isLocalFile(text) && copies.has(text.slice(1))
+        ? `@${copies.get(text.slice(1))}`
+        : text,
+    ) as Record<string, unknown>,
+    references: references.map(
+      ({ source: _source, ...reference }) => reference,
+    ),
+    sourceVersion: plan.sourceVersion,
+    createdAt: timestamp,
+  })
+
+  return versions
 }
 
 /**
- * 上传 input 引用的文件与源版本换取临时地址（每次下单都重新上传，不保存），每个版本壳
- * 各下一单并回填任务编号。上传或下单失败的版本标失败。
+ * 上传 input 引用的文件与源版本换取临时地址（每次下单都重新上传，不保存），再下 count
+ * 个任务。全部下单失败时报错；部分失败时返回成功的任务与失败原因。
  */
-async function dispatch(
-  dir: string,
-  generation: GenerationRecord,
-  versions: number[],
+async function placeOrders(
+  model: string,
+  input: Record<string, unknown>,
+  source: string | null,
+  count: number,
   deps: SubmitDeps,
-) {
-  let task: KieTaskRequest
+): Promise<Orders> {
+  const files = new Map<string, string>(
+    filePaths(input).map((file) => [`@${file}`, file]),
+  )
 
-  try {
-    const record = await readAsset(dir)
-    const sourceFile =
-      generation.sourceVersion != null
-        ? findVersion(record, generation.sourceVersion).file
-        : null
-    const files = new Map<string, string>(
-      filePaths(generation.input).map((file) => [
-        `@${file}`,
-        path.join(dir, file),
-      ]),
-    )
-
-    if (sourceFile && usesSource(generation.input)) {
-      files.set(SOURCE_TOKEN, path.join(dir, sourceFile))
+  if (usesSource(input)) {
+    if (!source) {
+      throw new CliError('源版本没有产物文件')
     }
 
-    const urls = new Map(
-      await Promise.all(
-        [...files].map(
-          async ([token, file]) => [token, await deps.upload(file)] as const,
-        ),
-      ),
-    )
-
-    task = {
-      model: generation.model,
-      input: resolveTokens(generation.input, (token) => urls.get(token)!),
-    }
-  } catch (error) {
-    await failVersions(dir, versions, (error as Error).message)
-
-    return
+    files.set(SOURCE_TOKEN, source)
   }
 
-  await Promise.all(
-    versions.map(async (number) => {
-      let taskId: string
-
-      try {
-        taskId = await deps.createTask(task)
-      } catch (error) {
-        await failVersions(dir, [number], (error as Error).message, task)
-
-        return
-      }
-
-      await updateAsset(dir, (record) => {
-        const version = record.versions.find((item) => item.number === number)
-
-        if (version?.state === 'generating') {
-          version.taskId = taskId
-          version.kieRequest = task
-          version.updatedAt = now()
-        }
-      })
-    }),
+  const urls = new Map(
+    await Promise.all(
+      [...files].map(
+        async ([token, file]) => [token, await deps.upload(file)] as const,
+      ),
+    ),
   )
-}
+  const request: KieTaskRequest = {
+    model,
+    input: resolveTokens(input, (token) => urls.get(token)!),
+  }
+  const results = await Promise.allSettled(
+    Array.from({ length: count }, () => deps.createTask(request)),
+  )
+  const taskIds = results.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
+  )
+  const errors = [
+    ...new Set(
+      results.flatMap((result) =>
+        result.status === 'rejected' ? [(result.reason as Error).message] : [],
+      ),
+    ),
+  ]
 
-async function failVersions(
-  dir: string,
-  numbers: number[],
-  reason: string,
-  task: KieTaskRequest | null = null,
-) {
-  await updateAsset(dir, (record) => {
-    for (const number of numbers) {
-      const version = record.versions.find((item) => item.number === number)
+  if (taskIds.length === 0) {
+    throw new CliError(errors[0] ?? '下单失败')
+  }
 
-      if (version) {
-        version.kieRequest = task
-      }
-
-      failVersion(record, number, reason)
-    }
-  })
+  return { request, taskIds, errors }
 }

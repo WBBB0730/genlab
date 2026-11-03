@@ -32,9 +32,6 @@ const defaultDeps: SyncDeps = {
   download: downloadFile,
 }
 
-/** 提交到一半中断（有记录、没任务编号）的版本，超过这个时长按失败处理，可重试。 */
-const STUCK_DISPATCH_MS = 10 * 60_000
-
 const POLL_INTERVAL_MS = 5_000
 
 /** 同步一批素材里所有生成中的版本；返回过程中遇到的问题（不中断其余任务）。 */
@@ -107,31 +104,11 @@ async function allSettled(
 
 async function syncAsset(dir: string, deps: SyncDeps): Promise<string[]> {
   const record = await readAsset(dir)
-  const generating = record.versions.filter(
-    (version) => version.state === 'generating',
-  )
-  const stuck = generating.filter(
-    (version) =>
-      !version.taskId &&
-      Date.now() - Date.parse(version.updatedAt) > STUCK_DISPATCH_MS,
-  )
-
-  if (stuck.length > 0) {
-    await updateAsset(dir, (latest) => {
-      for (const version of stuck) {
-        if (
-          !latest.versions.find((item) => item.number === version.number)
-            ?.taskId
-        ) {
-          failVersion(latest, version.number, '提交中断，可重试')
-        }
-      }
-    })
-  }
-
+  // 生成中的版本都带任务编号：下单成功后才写进记录。
   const taskIds = [
     ...new Set(
-      generating
+      record.versions
+        .filter((version) => version.state === 'generating')
         .map((version) => version.taskId)
         .filter((taskId): taskId is string => taskId != null),
     ),

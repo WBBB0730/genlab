@@ -125,7 +125,7 @@ describe('create + sync', () => {
 
     await writeFile(reference, PNG)
 
-    const versions = await createAsset(
+    const { versions } = await createAsset(
       project,
       location,
       {
@@ -147,9 +147,8 @@ describe('create + sync', () => {
         input: { prompt: '一只猫', image_urls: ['https://tmp/hero.png'] },
       },
     ])
-    expect(kie.uploads).toEqual([
-      path.join(location.dir, 'references/1/hero.png'),
-    ])
+    // 先上传原文件下单，成功后才复制进素材。
+    expect(kie.uploads).toEqual([reference])
 
     kie.records.set('task-1', success(['https://r/1.png']))
     kie.records.set('task-2', success(['https://r/2.png']))
@@ -278,7 +277,73 @@ describe('create + sync', () => {
     })
   })
 
-  it('下单失败的版本直接标失败', async () => {
+  it('下单或上传全部失败时报错，不留下素材', async () => {
+    const kie = fakeKie()
+    const reference = path.join(root, 'ref.png')
+    const failing = (step: 'upload' | 'createTask') => ({
+      ...kie.submit,
+      [step]: async () => {
+        throw new Error(`kie.ai 请求失败（402）：${step} 失败`)
+      },
+    })
+
+    await writeFile(reference, PNG)
+
+    for (const step of ['upload', 'createTask'] as const) {
+      await expect(
+        createAsset(
+          project,
+          locateAsset(project, 'a'),
+          {
+            model: 'test/image',
+            params: ['prompt=p', `image_urls=@${reference}`],
+          },
+          failing(step),
+        ),
+      ).rejects.toThrow(`${step} 失败`)
+      await expect(access(path.join(project.dir, 'a'))).rejects.toThrow()
+    }
+  })
+
+  it('并列任务部分下单失败：只为成功的任务建版本，失败原因随结果返回', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'a')
+    let calls = 0
+    const submission = await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'], count: 3 },
+      {
+        ...kie.submit,
+        createTask: async (task) => {
+          calls += 1
+
+          if (calls === 2) {
+            throw new Error('kie.ai 请求失败（429）：请求过于频繁')
+          }
+
+          return kie.submit.createTask(task)
+        },
+      },
+    )
+
+    expect(submission).toEqual({
+      versions: [1, 2],
+      errors: ['kie.ai 请求失败（429）：请求过于频繁'],
+    })
+
+    const record = await readAsset(location.dir)
+
+    expect(record.versions.map((version) => version.taskId)).toEqual([
+      'task-1',
+      'task-2',
+    ])
+    expect(
+      record.versions.every((version) => version.state === 'generating'),
+    ).toBe(true)
+  })
+
+  it('多个生成同时追加到同一素材：版本号与生成编号不重复', async () => {
     const kie = fakeKie()
     const location = locateAsset(project, 'a')
 
@@ -286,18 +351,29 @@ describe('create + sync', () => {
       project,
       location,
       { model: 'test/image', params: ['prompt=p'] },
-      {
-        ...kie.submit,
-        createTask: async () => {
-          throw new Error('kie.ai 请求失败（402）：余额不足')
-        },
-      },
+      kie.submit,
+    )
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        generateInAsset(
+          project,
+          location,
+          { model: 'test/image', params: [`prompt=p${index}`], count: 2 },
+          kie.submit,
+        ),
+      ),
     )
 
-    expect((await readAsset(location.dir)).versions[0]).toMatchObject({
-      state: 'failed',
-      failReason: 'kie.ai 请求失败（402）：余额不足',
-    })
+    const record = await readAsset(location.dir)
+    const numbers = record.versions.map((version) => version.number)
+    const ids = record.generations.map((generation) => generation.id)
+
+    expect(numbers).toHaveLength(17)
+    expect(new Set(numbers).size).toBe(17)
+    expect(new Set(ids).size).toBe(9)
+    expect(new Set(record.versions.map((version) => version.taskId)).size).toBe(
+      17,
+    )
   })
 
   it('同名、嵌套、校验失败、未知模型、误用 @source 都报错且不留文件', async () => {
@@ -364,7 +440,7 @@ describe('迭代', () => {
   it('AI 编辑：@source 换成源版本的地址，新版本记下源版本，当前版本不动', async () => {
     const kie = fakeKie()
     const location = await readyImage(kie)
-    const versions = await editVersion(
+    const { versions } = await editVersion(
       project,
       location,
       1,
@@ -444,7 +520,7 @@ describe('迭代', () => {
     })
   })
 
-  it('重试：原地重置并发新任务，版本号不变', async () => {
+  it('重试：下单成功后才回到生成中，版本号不变；下单失败时版本保持失败', async () => {
     const kie = fakeKie()
     const location = locateAsset(project, 'a')
 
@@ -457,7 +533,17 @@ describe('迭代', () => {
     kie.records.set('task-1', { state: 'fail', failMsg: 'x' })
     await syncAssets([location.dir], kie.sync)
 
-    expect(await retryVersion(location, 1, kie.submit)).toEqual([1])
+    await expect(
+      retryVersion(location, 1, {
+        ...kie.submit,
+        createTask: async () => {
+          throw new Error('kie.ai 请求失败（500）：服务繁忙')
+        },
+      }),
+    ).rejects.toThrow('服务繁忙')
+    expect((await readAsset(location.dir)).versions[0].state).toBe('failed')
+
+    expect((await retryVersion(location, 1, kie.submit)).versions).toEqual([1])
     expect((await readAsset(location.dir)).versions[0]).toMatchObject({
       state: 'generating',
       taskId: 'task-2',

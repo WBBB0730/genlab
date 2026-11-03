@@ -7,7 +7,7 @@ import {
   generateInAsset,
   retryVersion,
 } from '../generation/submit'
-import type { GenerateOptions } from '../generation/submit'
+import type { GenerateOptions, Submission } from '../generation/submit'
 import { waitForVersions } from '../generation/sync'
 import { currentProject, locateAsset } from '../library/context'
 import type { AssetLocation, ProjectContext } from '../library/context'
@@ -30,13 +30,15 @@ function toGenerateOptions(args: GenerationArgs): GenerateOptions {
   return { model: args.model, params: args.param, count: args.count }
 }
 
-/** 按需等待新版本完成，再输出这些版本的状态。 */
+/** 部分下单失败的原因作为警告输出；按需等待新版本完成，再输出这些版本的状态。 */
 async function finish(
   project: ProjectContext,
   location: AssetLocation,
-  versions: number[],
+  { versions, errors }: Submission,
   options: WaitOptions,
 ) {
+  errors.forEach((error) => warn(`部分任务下单失败：${error}`))
+
   if (options.wait) {
     const { warnings } = await waitForVersions(
       [{ dir: location.dir, versions }],
@@ -57,9 +59,13 @@ async function finish(
 export async function createCommand(assetPath: string, args: GenerationArgs) {
   const project = await currentProject()
   const location = locateAsset(project, assetPath)
-  const versions = await createAsset(project, location, toGenerateOptions(args))
+  const submission = await createAsset(
+    project,
+    location,
+    toGenerateOptions(args),
+  )
 
-  return finish(project, location, versions, args)
+  return finish(project, location, submission, args)
 }
 
 export async function generateCommand(
@@ -68,12 +74,12 @@ export async function generateCommand(
 ) {
   const project = await currentProject()
   const location = locateAsset(project, assetPath)
-  const versions = await generateInAsset(project, location, {
+  const submission = await generateInAsset(project, location, {
     ...toGenerateOptions(args),
     from: args.from == null ? undefined : parseVersionArg(args.from),
   })
 
-  return finish(project, location, versions, args)
+  return finish(project, location, submission, args)
 }
 
 export async function editCommand(
@@ -83,14 +89,14 @@ export async function editCommand(
 ) {
   const project = await currentProject()
   const location = locateAsset(project, assetPath)
-  const versions = await editVersion(
+  const submission = await editVersion(
     project,
     location,
     parseVersionArg(version),
     toGenerateOptions(args),
   )
 
-  return finish(project, location, versions, args)
+  return finish(project, location, submission, args)
 }
 
 export async function retryCommand(
@@ -100,9 +106,9 @@ export async function retryCommand(
 ) {
   const project = await currentProject()
   const location = locateAsset(project, assetPath)
-  const versions = await retryVersion(location, parseVersionArg(version))
+  const submission = await retryVersion(location, parseVersionArg(version))
 
-  return finish(project, location, versions, args)
+  return finish(project, location, submission, args)
 }
 
 /** 等待某个素材、或当前项目里全部生成中的版本。 */
