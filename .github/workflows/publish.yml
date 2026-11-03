@@ -1,0 +1,38 @@
+# https://docs.npmjs.com/trusted-publishers/
+# Configure on npmjs.com: Package → Settings → Trusted publishing → publish.yml
+name: Publish Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # never use caching in release builds
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm test
+      - name: Publish to npm (beta)
+        if: contains(github.ref_name, '-beta')
+        run: npm publish --tag beta
+      - name: Publish to npm
+        if: ${{ !contains(github.ref_name, '-beta') }}
+        run: npm publish

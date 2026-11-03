@@ -1,0 +1,531 @@
+/** 生成全流程：在临时目录里跑真实文件系统，模型目录用本地缓存，kie 网络层用替身。 */
+import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  createAsset,
+  editVersion,
+  generateInAsset,
+  retryVersion,
+} from '../../src/generation/submit'
+import type { SubmitDeps } from '../../src/generation/submit'
+import { syncAssets } from '../../src/generation/sync'
+import type { SyncDeps } from '../../src/generation/sync'
+import type * as KieClient from '../../src/kie/client'
+import type { KieTaskRequest } from '../../src/kie/client'
+import type { KieRecord } from '../../src/kie/record'
+import { locateAsset } from '../../src/library/context'
+import type { ProjectContext } from '../../src/library/context'
+import { deleteVersion, importAsset } from '../../src/library/ops'
+import { readAsset } from '../../src/library/record'
+import { MODELS, SCHEMAS, writeCatalogCache } from '../fixtures/catalog'
+
+// 缓存未命中或刷新目录时也不访问网络。
+vi.mock('../../src/kie/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof KieClient>()),
+  listKieModels: async () => MODELS,
+  getKieModelSchema: async (model: string) => SCHEMAS[model] ?? null,
+}))
+
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+/** 最小的 WAV：44 字节头 + 100 个静音采样。 */
+function wav(): Buffer {
+  const data = Buffer.alloc(200)
+  const header = Buffer.alloc(44)
+
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + data.length, 4)
+  header.write('WAVEfmt ', 8)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(8000, 24)
+  header.writeUInt32LE(16000, 28)
+  header.writeUInt16LE(2, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(data.length, 40)
+
+  return Buffer.concat([header, data])
+}
+
+let root: string
+let project: ProjectContext
+const originalCache = process.env.XDG_CACHE_HOME
+
+/** kie 替身：记录上传与下单，任务结果由测试按任务编号设定。 */
+function fakeKie() {
+  const uploads: string[] = []
+  const tasks: KieTaskRequest[] = []
+  const records = new Map<string, Omit<KieRecord, 'taskId'>>()
+  const files = new Map<string, Buffer>()
+  const submit: SubmitDeps = {
+    upload: async (file) => {
+      uploads.push(file)
+
+      return `https://tmp/${path.basename(file)}`
+    },
+    createTask: async (task) => {
+      tasks.push(task)
+
+      return `task-${tasks.length}`
+    },
+  }
+  const sync: SyncDeps = {
+    getRecord: async (taskId) => ({
+      taskId,
+      ...(records.get(taskId) ?? { state: 'generating' }),
+    }),
+    download: async (url) => ({
+      bytes: files.get(url) ?? PNG,
+      contentType: null,
+    }),
+  }
+
+  return { uploads, tasks, records, files, submit, sync }
+}
+
+function success(urls: string[], credits = 3): Omit<KieRecord, 'taskId'> {
+  return {
+    state: 'success',
+    resultJson: JSON.stringify({ resultUrls: urls }),
+    creditsConsumed: credits,
+  }
+}
+
+beforeEach(async () => {
+  root = await mkdtemp(path.join(tmpdir(), 'genhub-test-'))
+  project = {
+    root,
+    name: 'p',
+    dir: path.join(root, 'p'),
+    codeProject: { remote: null, path: root },
+  }
+  process.env.XDG_CACHE_HOME = path.join(root, '.cache')
+  await writeCatalogCache(process.env.XDG_CACHE_HOME)
+})
+
+afterEach(async () => {
+  process.env.XDG_CACHE_HOME = originalCache
+  await rm(root, { recursive: true, force: true })
+})
+
+describe('create + sync', () => {
+  it('并列任务：文件上传后换成地址，模板记副本路径，收取后就位', async () => {
+    const kie = fakeKie()
+    const reference = path.join(root, 'hero.png')
+    const location = locateAsset(project, '角色/主角立绘')
+
+    await writeFile(reference, PNG)
+
+    const versions = await createAsset(
+      project,
+      location,
+      {
+        model: 'test/image',
+        params: ['prompt=一只猫', `image_urls=@${reference}`],
+        count: 2,
+      },
+      kie.submit,
+    )
+
+    expect(versions).toEqual([1, 2])
+    expect(kie.tasks).toEqual([
+      {
+        model: 'test/image',
+        input: { prompt: '一只猫', image_urls: ['https://tmp/hero.png'] },
+      },
+      {
+        model: 'test/image',
+        input: { prompt: '一只猫', image_urls: ['https://tmp/hero.png'] },
+      },
+    ])
+    expect(kie.uploads).toEqual([
+      path.join(location.dir, 'references/1/hero.png'),
+    ])
+
+    kie.records.set('task-1', success(['https://r/1.png']))
+    kie.records.set('task-2', success(['https://r/2.png']))
+    await syncAssets([location.dir], kie.sync)
+
+    const record = await readAsset(location.dir)
+
+    expect(record.currentVersion).toBe(1)
+    expect(record.generations[0]).toMatchObject({
+      model: 'test/image',
+      input: { prompt: '一只猫', image_urls: ['@references/1/hero.png'] },
+      references: [
+        {
+          file: 'references/1/hero.png',
+          name: 'hero.png',
+          kind: 'image',
+          origin: null,
+        },
+      ],
+    })
+    expect(record.versions[0]).toMatchObject({
+      state: 'ready',
+      file: 'v1.png',
+      width: 1,
+      credits: 3,
+    })
+    expect((await readdir(location.dir)).sort()).toEqual([
+      'asset.json',
+      'references',
+      'v1.png',
+      'v2.png',
+    ])
+  })
+
+  it('当前版本失败时顺位到同一次生成里靠后的版本', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'a')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'], count: 2 },
+      kie.submit,
+    )
+    kie.records.set('task-1', { state: 'fail', failMsg: '内容违规' })
+    await syncAssets([location.dir], kie.sync)
+
+    const record = await readAsset(location.dir)
+
+    expect(record.currentVersion).toBe(2)
+    expect(record.versions[0]).toMatchObject({
+      state: 'failed',
+      failReason: '内容违规',
+    })
+  })
+
+  it('一个任务返回多个结果：多出来的追加为新版本，积分只记在序号 0', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, '配乐/主菜单')
+
+    kie.files.set('https://r/1.wav', wav())
+    kie.files.set('https://r/2.wav', wav())
+    await createAsset(
+      project,
+      location,
+      {
+        model: 'test/music',
+        params: ['prompt=轻快', 'instrumental=true'],
+      },
+      kie.submit,
+    )
+
+    expect(kie.tasks[0].input.instrumental).toBe(true)
+
+    kie.records.set('task-1', {
+      state: 'success',
+      resultJson: JSON.stringify({
+        data: [
+          { audio_url: 'https://r/1.wav', duration: 12.5 },
+          { audio_url: 'https://r/2.wav', duration: 13 },
+        ],
+      }),
+      creditsConsumed: 12,
+    })
+    await syncAssets([location.dir], kie.sync)
+
+    const record = await readAsset(location.dir)
+
+    expect(record.kind).toBe('audio')
+    expect(record.versions).toMatchObject([
+      {
+        number: 1,
+        state: 'ready',
+        credits: 12,
+        file: 'v1.wav',
+        resultIndex: 0,
+      },
+      {
+        number: 2,
+        state: 'ready',
+        credits: null,
+        file: 'v2.wav',
+        resultIndex: 1,
+        position: 1,
+        taskId: 'task-1',
+      },
+    ])
+  })
+
+  it('产物类型与素材不符时按失败处理', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'v')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/video', params: ['prompt=p'] },
+      kie.submit,
+    )
+    kie.records.set('task-1', success(['https://r/x.png']))
+    await syncAssets([location.dir], kie.sync)
+
+    expect((await readAsset(location.dir)).versions[0]).toMatchObject({
+      state: 'failed',
+      failReason: '产物类型（image）与素材类型（video）不符',
+    })
+  })
+
+  it('下单失败的版本直接标失败', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'a')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'] },
+      {
+        ...kie.submit,
+        createTask: async () => {
+          throw new Error('kie.ai 请求失败（402）：余额不足')
+        },
+      },
+    )
+
+    expect((await readAsset(location.dir)).versions[0]).toMatchObject({
+      state: 'failed',
+      failReason: 'kie.ai 请求失败（402）：余额不足',
+    })
+  })
+
+  it('同名、嵌套、校验失败、未知模型、误用 @source 都报错且不留文件', async () => {
+    const kie = fakeKie()
+    const ok = { model: 'test/image', params: ['prompt=p'] }
+
+    await createAsset(project, locateAsset(project, 'a'), ok, kie.submit)
+
+    await expect(
+      createAsset(project, locateAsset(project, 'a'), ok, kie.submit),
+    ).rejects.toThrow('素材已存在')
+    await expect(
+      createAsset(project, locateAsset(project, 'a/b'), ok, kie.submit),
+    ).rejects.toThrow('不能在素材里新建素材')
+
+    for (const [options, message] of [
+      [
+        { model: 'test/image', params: ['resolution=8K'] },
+        '参数不符合模型定义',
+      ],
+      [{ model: 'test/nope', params: ['prompt=p'] }, '未知模型'],
+      [
+        { model: 'test/image', params: ['prompt=p', 'image_urls=@source'] },
+        '@source 只能用于 AI 编辑',
+      ],
+      [
+        {
+          model: 'test/image',
+          params: ['prompt=p', 'image_urls=@/no/such.png'],
+        },
+        '文件不存在',
+      ],
+    ] as const) {
+      await expect(
+        createAsset(
+          project,
+          locateAsset(project, 'c'),
+          { ...options, params: [...options.params] },
+          kie.submit,
+        ),
+      ).rejects.toThrow(message)
+    }
+
+    await expect(access(path.join(project.dir, 'c'))).rejects.toThrow()
+  })
+})
+
+describe('迭代', () => {
+  async function readyImage(kie: ReturnType<typeof fakeKie>) {
+    const location = locateAsset(project, 'a')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=一只猫', 'resolution=1K'] },
+      kie.submit,
+    )
+    kie.records.set('task-1', success(['https://r/1.png']))
+    await syncAssets([location.dir], kie.sync)
+
+    return location
+  }
+
+  it('AI 编辑：@source 换成源版本的地址，新版本记下源版本，当前版本不动', async () => {
+    const kie = fakeKie()
+    const location = await readyImage(kie)
+    const versions = await editVersion(
+      project,
+      location,
+      1,
+      { params: ['prompt=改成蓝色', 'image_urls=@source'] },
+      kie.submit,
+    )
+
+    expect(versions).toEqual([2])
+    expect(kie.uploads.at(-1)).toBe(path.join(location.dir, 'v1.png'))
+    expect(kie.tasks.at(-1)).toEqual({
+      model: 'test/image',
+      input: { prompt: '改成蓝色', image_urls: ['https://tmp/v1.png'] },
+    })
+
+    const record = await readAsset(location.dir)
+
+    expect(record.currentVersion).toBe(1)
+    expect(record.versions[1]).toMatchObject({
+      sourceVersion: 1,
+      generation: 2,
+    })
+    expect(record.generations[1].input.image_urls).toEqual(['@source'])
+  })
+
+  it('AI 编辑必须用 @source 引用源版本，模型类型须与素材一致', async () => {
+    const kie = fakeKie()
+    const location = await readyImage(kie)
+
+    await expect(
+      editVersion(project, location, 1, { params: ['prompt=改'] }, kie.submit),
+    ).rejects.toThrow('@source')
+    await expect(
+      editVersion(
+        project,
+        location,
+        1,
+        { model: 'test/video', params: ['video_url=@source'] },
+        kie.submit,
+      ),
+    ).rejects.toThrow('与素材类型 image 不符')
+  })
+
+  it('重新生成：沿用模型与 input，覆盖指定键，参考输入复制进新的生成', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'r')
+    const reference = path.join(root, 'ref.png')
+
+    await writeFile(reference, PNG)
+    await createAsset(
+      project,
+      location,
+      {
+        model: 'test/image',
+        params: ['prompt=猫', `image_urls=@${reference}`],
+      },
+      kie.submit,
+    )
+    await generateInAsset(
+      project,
+      location,
+      { from: 1, params: ['resolution=2K'] },
+      kie.submit,
+    )
+
+    expect(kie.tasks.at(-1)).toEqual({
+      model: 'test/image',
+      input: {
+        prompt: '猫',
+        image_urls: ['https://tmp/ref.png'],
+        resolution: '2K',
+      },
+    })
+    expect((await readAsset(location.dir)).generations[1].input).toEqual({
+      prompt: '猫',
+      image_urls: ['@references/2/ref.png'],
+      resolution: '2K',
+    })
+  })
+
+  it('重试：原地重置并发新任务，版本号不变', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'a')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'] },
+      kie.submit,
+    )
+    kie.records.set('task-1', { state: 'fail', failMsg: 'x' })
+    await syncAssets([location.dir], kie.sync)
+
+    expect(await retryVersion(location, 1, kie.submit)).toEqual([1])
+    expect((await readAsset(location.dir)).versions[0]).toMatchObject({
+      state: 'generating',
+      taskId: 'task-2',
+      failReason: null,
+    })
+    await expect(retryVersion(location, 1, kie.submit)).rejects.toThrow(
+      '只有失败的版本可以重试',
+    )
+  })
+
+  it('删除：有派生版本的不能删；删光一次生成时连同参考输入一起删', async () => {
+    const kie = fakeKie()
+    const location = await readyImage(kie)
+    const reference = path.join(root, 'ref.png')
+
+    await writeFile(reference, PNG)
+    await editVersion(
+      project,
+      location,
+      1,
+      {
+        params: ['prompt=改', 'image_urls=@source', `image_urls=@${reference}`],
+      },
+      kie.submit,
+    )
+    kie.records.set('task-2', success(['https://r/2.png']))
+    await syncAssets([location.dir], kie.sync)
+
+    await expect(deleteVersion(location, 1)).rejects.toThrow('有派生版本')
+    await deleteVersion(location, 2)
+
+    const record = await readAsset(location.dir)
+
+    expect(record.generations.map((generation) => generation.id)).toEqual([1])
+    expect(await readdir(path.join(location.dir, 'references'))).toEqual([])
+    await expect(deleteVersion(location, 1)).rejects.toThrow('至少保留一个版本')
+  })
+
+  it('导入：外部文件成为就绪的 v1，库内产物作为参考输入时记下出处', async () => {
+    const kie = fakeKie()
+    const external = path.join(root, 'old.png')
+    const imported = locateAsset(project, '导入/旧立绘')
+
+    await writeFile(external, PNG)
+    await importAsset(project, imported, external)
+
+    expect(await readAsset(imported.dir)).toMatchObject({
+      kind: 'image',
+      currentVersion: 1,
+      versions: [{ state: 'ready', origin: 'import', importedFrom: 'old.png' }],
+    })
+
+    await createAsset(
+      project,
+      locateAsset(project, '新立绘'),
+      {
+        model: 'test/image',
+        params: [
+          'prompt=p',
+          `image_urls=@${path.join(imported.dir, 'v1.png')}`,
+        ],
+      },
+      kie.submit,
+    )
+
+    expect(
+      (await readAsset(path.join(project.dir, '新立绘'))).generations[0]
+        .references[0].origin,
+    ).toEqual({ asset: 'p/导入/旧立绘', version: 1 })
+  })
+})
