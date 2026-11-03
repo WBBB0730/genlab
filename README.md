@@ -20,7 +20,7 @@ genhub init
 给 agent 安装使用说明（skill）：
 
 ```bash
-npx skills add WBBB0730/genhub-cli -g -s genhub
+npx skills add WBBB0730/genhub -g -s genhub
 ```
 
 ## 用法

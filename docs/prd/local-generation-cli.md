@@ -54,7 +54,7 @@
 
 ## Implementation Decisions
 
-- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genhub`（`npx genhub` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是仓库内的 skill（`skills/genhub`），不随 npm 包发布，用 `npx skills add WBBB0730/genhub-cli -g -s genhub` 安装。MCP 入口以后需要时在同一套核心上再包一层。
+- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genhub`（`npx genhub` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是仓库内的 skill（`skills/genhub`），不随 npm 包发布，用 `npx skills add WBBB0730/genhub -g -s genhub` 安装。MCP 入口以后需要时在同一套核心上再包一层。
 - **复用 GenHub**：kie 的 `createTask` / `recordInfo` 封装、任务记录解析（kie 五态归约为生成中 / 就绪 / 失败三态）、版本规则。登录、项目权限、Supabase、webhook、Vercel 一概不要。
 - **模型**（见 ADR-0005）：不写死，`-m` 填 kie 的模型标识。
   - 模型目录取自 `GET /api/v1/models`，素材类型由目录的任务类型推出（Text/Image to Image、Image Editing → 图片；… to Video、Video Editing、Lip Sync、Speech to Video → 视频；Text to Speech、Text to Music、Audio to Audio → 音频）；对话模型不支持，任务类型互相矛盾或未知的模型报错。

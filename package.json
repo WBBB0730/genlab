@@ -5,10 +5,10 @@
   "description": "给本地 agent 用的 AI 媒体生成命令行工具（kie.ai），产物与完整生成记录保存在本机",
   "author": "WBBB",
   "license": "MIT",
-  "homepage": "https://github.com/WBBB0730/genhub-cli#readme",
+  "homepage": "https://github.com/WBBB0730/genhub#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WBBB0730/genhub-cli.git"
+    "url": "git+https://github.com/WBBB0730/genhub.git"
   },
   "publishConfig": {
     "access": "public"
