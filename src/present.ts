@@ -31,15 +31,40 @@ export function presentVersion(dir: string, version: VersionRecord) {
   })
 }
 
-/** versions 指定时只列这些版本；pending 表示其中仍有生成中的版本。 */
+/**
+ * 加上与这些版本同一个 kie 任务的版本：一个任务返回多个结果时，多出来的结果在收取时
+ * 才追加为新版本。
+ */
+function withTaskSiblings(record: AssetRecord, versions: number[]): number[] {
+  const taskIds = new Set(
+    record.versions
+      .filter((version) => versions.includes(version.number))
+      .map((version) => version.taskId)
+      .filter((taskId) => taskId != null),
+  )
+
+  return record.versions
+    .filter(
+      (version) =>
+        versions.includes(version.number) ||
+        (version.taskId != null && taskIds.has(version.taskId)),
+    )
+    .map((version) => version.number)
+}
+
+/**
+ * versions 指定时只列这些版本（连同同一任务追加出的版本）；pending 表示其中仍有生成中
+ * 的版本。
+ */
 export function presentAsset(
   project: ProjectContext,
   location: AssetLocation,
   record: AssetRecord,
   versions?: number[],
 ) {
+  const wanted = versions && withTaskSiblings(record, versions)
   const listed = record.versions.filter(
-    (version) => !versions || versions.includes(version.number),
+    (version) => !wanted || wanted.includes(version.number),
   )
 
   return {

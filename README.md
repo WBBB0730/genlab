@@ -4,7 +4,7 @@
 
 ## 安装
 
-需要 Node.js 22+。
+需要 Node.js 22.19 及以上。
 
 ```bash
 npm install -g genlab   # 或直接 npx genlab <命令>

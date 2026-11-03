@@ -36,8 +36,8 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2
       write-file-atomic:
-        specifier: ^8.0.0
-        version: 8.0.0
+        specifier: ^7.0.1
+        version: 7.0.1
     devDependencies:
       '@tanstack/eslint-config':
         specifier: ^0.4.0
@@ -1577,9 +1577,9 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
-  write-file-atomic@8.0.0:
-    resolution: {integrity: sha512-dYwyZredl67GyLLIHJnRM3h2PcOmN5SkcgC7eM5DPDEOEl6dLFqVrMg3F1Ea32usj4VSVZtd2H4MtKTNOf6nPg==}
-    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+  write-file-atomic@7.0.1:
+    resolution: {integrity: sha512-OTIk8iR8/aCRWBqvxrzxR0hgxWpnYBblY1S5hDWBQfk/VFmJwzmJgQFN3WsoUKHISv2eAwe+PpbUzyL1CKTLXg==}
+    engines: {node: ^20.17.0 || >=22.9.0}
 
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
@@ -2872,7 +2872,7 @@ snapshots:
 
   word-wrap@1.2.5: {}
 
-  write-file-atomic@8.0.0:
+  write-file-atomic@7.0.1:
     dependencies:
       signal-exit: 4.1.0
 
