@@ -138,7 +138,7 @@ function describeObject(schema: JsonSchema): ParamInfo[] {
   })
 }
 
-/** 把 input 的 schema 整理成参数表（`genhub models <id>` 的输出）。 */
+/** 把 input 的 schema 整理成参数表（`genlab models <id>` 的输出）。 */
 export function describeInput(schema: JsonSchema): InputDescription {
   const branches = (schema.oneOf ?? schema.anyOf) as JsonSchema[] | undefined
   const description: InputDescription = { params: describeObject(schema) }

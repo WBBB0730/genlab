@@ -12,15 +12,15 @@
 
 ## Solution
 
-做一个命令行工具 `genhub`，配一份给 agent 看的使用说明（skill）。agent 在代码项目里调用一条命令，工具就向 kie.ai 下单、自己轮询结果、把产物下载进本机的**库**，返回文件的完整路径，并留下完整的生成记录。支持图片、视频、音频三种素材类型，音频涵盖音乐、音效与语音。
+做一个命令行工具 `genlab`，配一份给 agent 看的使用说明（skill）。agent 在代码项目里调用一条命令，工具就向 kie.ai 下单、自己轮询结果、把产物下载进本机的**库**，返回文件的完整路径，并留下完整的生成记录。支持图片、视频、音频三种素材类型，音频涵盖音乐、音效与语音。
 
 - **库**集中放在配置指定的目录里，不随代码项目的清理而丢失（见 ADR-0003）。
-- 以 npm 包 `genhub` 发布，`npm install -g genhub` 或 `npx genhub <命令>` 即可使用。
+- 以 npm 包 `genlab` 发布，`npm install -g genlab` 或 `npx genlab <命令>` 即可使用。
 - 库的组织沿用 GenHub 内容重组之前、以**素材**为核心的模型：**项目** → 可嵌套的**文件夹** → **素材** → **版本**（见 ADR-0001）。
 - 库就是普通的文件夹：每个素材一个文件夹，里面是记录文件、各版本产物和**参考输入**副本，在 Finder 里看到的就是库本身（见 ADR-0002）。
 - **代码项目**通过**项目映射**自动对应到库里的**项目**，worktree、目录改名、重新 clone 都不影响（见 ADR-0004）。
 - 可用模型与参数实时取自 kie 的模型目录与 schema，不写死（见 ADR-0005），覆盖 kie 上全部图片、视频、音频模型。下单、查结果、结果解析复用 GenHub 已验证的代码。
-- `genhub init` 一条命令写好配置。
+- `genlab init` 一条命令写好配置。
 
 ## User Stories
 
@@ -54,12 +54,12 @@
 
 ## Implementation Decisions
 
-- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genhub`（`npx genhub` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是仓库内的 skill（`skills/genhub`），不随 npm 包发布，用 `npx skills add WBBB0730/genhub -g -s genhub` 安装。MCP 入口以后需要时在同一套核心上再包一层。
+- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genlab`（`npx genlab` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是仓库内的 skill（`skills/genlab`），不随 npm 包发布，用 `npx skills add WBBB0730/genlab -g -s genlab` 安装。MCP 入口以后需要时在同一套核心上再包一层。
 - **复用 GenHub**：kie 的 `createTask` / `recordInfo` 封装、任务记录解析（kie 五态归约为生成中 / 就绪 / 失败三态）、版本规则。登录、项目权限、Supabase、webhook、Vercel 一概不要。
 - **模型**（见 ADR-0005）：不写死，`-m` 填 kie 的模型标识。
   - 模型目录取自 `GET /api/v1/models`，素材类型由目录的任务类型推出（Text/Image to Image、Image Editing → 图片；… to Video、Video Editing、Lip Sync、Speech to Video → 视频；Text to Speech、Text to Music、Audio to Audio → 音频）；对话模型不支持，任务类型互相矛盾或未知的模型报错。
   - 参数定义取自 `GET /api/v1/models/{模型}/schema` 的 OpenAPI 文档，只支持走 `/api/v1/jobs/createTask` 的模型；文档未同步（为 null）时报错。`$ref` 用 json-schema-ref-parser 展开。
-  - 目录与 schema 缓存在 `$XDG_CACHE_HOME/genhub`（默认 `~/.cache/genhub`），一天有效，`models --refresh` 强制刷新；缓存里找不到模型时自动刷新一次目录。同一进程内目录类请求保持 1.1 秒间隔（kie 限 1 次/秒），被限流时等一个间隔重试一次。
+  - 目录与 schema 缓存在 `$XDG_CACHE_HOME/genlab`（默认 `~/.cache/genlab`），一天有效，`models --refresh` 强制刷新；缓存里找不到模型时自动刷新一次目录。同一进程内目录类请求保持 1.1 秒间隔（kie 限 1 次/秒），被限流时等一个间隔重试一次。
   - `models` 列出目录（可按类型、关键词筛选）；`models <模型>` 输出价格说明与参数表（参数名、类型、可选值、默认值、范围、是否必填、说明；input 为 oneOf / anyOf 时列出各分支）。
   - 在已有素材上生成时，模型的素材类型必须与素材一致。
 - **参数**：`-p key=value` 为字符串，`-p key:=<JSON>` 为 JSON 值，同一个键重复即数组。按模型 schema 用 Ajv（JSON Schema 2020-12）校验，按 schema 把字符串转成数字、布尔，单值转数组；不校验 uri 等格式；错误信息用 ajv-i18n 中文化。不注入 schema 默认值，记录的就是实际发出的参数。
@@ -68,7 +68,7 @@
 - **等待**：`create`、`generate`、`edit`、`retry` 提交后默认轮询到全部新版本终态才返回，默认最多等 90 秒（agent 执行命令一般 2 分钟超时），可用 `--timeout` 调整，用 `--no-wait` 提交后立即返回。没完成就返回当前状态（`pending: true`），用 `wait` 接着等；`wait` 不指定素材时等待当前项目里全部生成中的版本。
 - **补收**：除 `models`、`project`、`wait` 外，任何命令运行前先把库里所有生成中的版本向 kie 查一遍，收下已完成的。kie 产物 14 天后失效，这期间都能补回。有记录、没有任务编号的版本（提交到一半中断）超过 10 分钟标失败，可重试。同一素材的写入互斥。
 - **文件交付**：kie 访问不到本机文件，下单前通过 kie 的文件上传接口换成临时地址（24 小时有效、地址不带查询参数）。每次下单（含重试）都重新上传，不保存地址。
-- **配置**：`$XDG_CONFIG_HOME/genhub/.env`（默认 `~/.config/genhub/.env`）存 `KIE_API_KEY` 与库的根目录 `GENHUB_LIBRARY`（绝对路径，可用 `~` 开头），已存在的环境变量优先。不放在工具目录：经 npx 运行时包在临时缓存里。未配置直接报错，不回落到任何默认位置。`genhub init` 写入该文件：终端里交互询问 API Key（掩码输入，回车沿用已有）与库目录（默认 `~/GenHub`），也可用 `--key`、`--library` 直接给出；先用余额接口验证 Key，再建好库目录、以 600 权限写入配置，输出配置路径、库目录与余额。非终端且缺 Key 时报错。仓库另提供 `.env.example`。
+- **配置**：`$XDG_CONFIG_HOME/genlab/.env`（默认 `~/.config/genlab/.env`）存 `KIE_API_KEY` 与库的根目录 `GENLAB_LIBRARY`（绝对路径，可用 `~` 开头），已存在的环境变量优先。不放在工具目录：经 npx 运行时包在临时缓存里。未配置直接报错，不回落到任何默认位置。`genlab init` 写入该文件：终端里交互询问 API Key（掩码输入，回车沿用已有）与库目录（默认 `~/GenLab`），也可用 `--key`、`--library` 直接给出；先用余额接口验证 Key，再建好库目录、以 600 权限写入配置，输出配置路径、库目录与余额。非终端且缺 Key 时报错。仓库另提供 `.env.example`。
 - **项目映射**（见 ADR-0004）：映射表 `projects.json` 放在库根目录。有远程仓库的代码项目按远程地址识别（https、scp、ssh 写法视为同一仓库），首次使用自动以远程仓库名登记，仓库名已被其他代码项目占用时报错要求指定；没有远程仓库的按主仓库所在位置识别（worktree 归到它的主仓库，不是 git 仓库的目录按目录位置），首次使用必须用 `project <名字>` 登记。查表时先按远程地址找，找不到再按位置找尚未记录远程地址的条目，找到就补上远程地址、名字不变。修改映射只改对应关系，不移动已有的素材文件夹。
 - **目录结构**（见 ADR-0002）：`<库>/<项目>/<文件夹…>/<素材名>/`，素材文件夹里放记录文件 `asset.json`、各版本产物 `v<版本号>.<扩展名>`、`references/<生成编号>/` 下的参考输入副本（保留原文件名，同名加序号）。含记录文件的文件夹才是素材，素材里不能再建素材。素材名就是文件夹名，不另存。查询和补收直接扫描库目录，不建总索引。
 - **文件夹**：放在哪个文件夹由 agent 指定，可以按用途分也可以按类型分，工具不按类型自动分目录。`create`、`import` 时自动建好路径上缺的文件夹。使用说明要求 agent 先用 `list` 看已有的文件夹，尽量沿用。改名、移动、删除素材或文件夹在 Finder 里做，工具不提供对应命令。
@@ -111,7 +111,7 @@
   - 项目映射：远程地址归一、自动登记、同一远程的多个副本、未登记报错、中途建远程、仓库名被占用。
   - 版本规则：当前版本的失败顺延、删除后的指针回退、叶子判定、版本号分配。
   - 生成全流程：在临时目录里跑真实文件系统，kie 网络层用替身——并列任务与收取、文件上传与模板改写、失败顺延、一个任务多个结果追加版本、产物类型不符、下单失败、同名 / 嵌套 / 校验失败 / 未知模型 / 误用 `@source` 报错且不留文件、AI 编辑、重新生成、重试、删除与参考输入清理、导入与库内出处。
-- 单测不真实调用 kie。真实冒烟须经用户同意并控制花费（2026-11-03 用户授权 ¥10 以内，两轮合计约 171 积分 ≈ ¥6.2）。改为动态模型后已验证：模型目录与参数表、参数校验报错、GPT Image 2.5 Sunburst 文生图与 AI 编辑（`@source`）、Suno V6 Mini 音乐与音效（一个任务 2 个结果追加为 2 个版本）、Wan 3.0 首帧图生视频（`@文件` 与库内出处）、重新生成、`genhub init`（写入、沿用、Key 无效、缺 Key）。此前写死模型阶段另验证过 Wan 3.0 文生视频、Wan 2.7 视频编辑、MiniMax H3、Suno AI 编辑与项目映射。
+- 单测不真实调用 kie。真实冒烟须经用户同意并控制花费（2026-11-03 用户授权 ¥10 以内，两轮合计约 171 积分 ≈ ¥6.2）。改为动态模型后已验证：模型目录与参数表、参数校验报错、GPT Image 2.5 Sunburst 文生图与 AI 编辑（`@source`）、Suno V6 Mini 音乐与音效（一个任务 2 个结果追加为 2 个版本）、Wan 3.0 首帧图生视频（`@文件` 与库内出处）、重新生成、`genlab init`（写入、沿用、Key 无效、缺 Key）。此前写死模型阶段另验证过 Wan 3.0 文生视频、Wan 2.7 视频编辑、MiniMax H3、Suno AI 编辑与项目映射。
 
 ## Out of Scope
 
@@ -131,4 +131,5 @@
 - 选择自己写而不用 kie-cli-mcp：它最核心的缺口正好是不把成品存到本地，而它的大部分功能（几十个模型、生成前出计划并确认）用不上。
 - ElevenLabs 语音模型在 2026-11-03 冒烟时均在 kie 侧排队后上游超时失败（退款，记 0 积分），kie 成功率接口显示同期成功率为 0；工具侧行为正确，产物链路待 kie 恢复后再验证。
 - kie 账号的余额可能同时被其他用途消耗，核算花费以各版本记录的积分为准。
+- 包名原为 `genhub`（沿用网页版的名字），首次发布时被 npm 以「与 `github` 过于相似」拒绝，改名为 `genlab`；npm 的相似名检查只在发布时执行，事先查不到。
 - kie 文档中的参数定义偶有自相矛盾（如默认值不在可选值里），以 schema 校验加 kie 实际返回为准；参数不合法时 kie 在下单阶段拒绝，不扣积分。

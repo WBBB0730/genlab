@@ -99,7 +99,7 @@ export const SCHEMAS: Record<string, unknown> = {
 
 /** 把目录与 schema 写成新鲜的缓存（XDG_CACHE_HOME 指向 cacheHome）。 */
 export async function writeCatalogCache(cacheHome: string) {
-  const dir = path.join(cacheHome, 'genhub')
+  const dir = path.join(cacheHome, 'genlab')
   const entry = (value: unknown) =>
     JSON.stringify({ fetchedAt: Date.now(), value })
 

@@ -101,7 +101,7 @@ function success(urls: string[], credits = 3): Omit<KieRecord, 'taskId'> {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'genhub-test-'))
+  root = await mkdtemp(path.join(tmpdir(), 'genlab-test-'))
   project = {
     root,
     name: 'p',

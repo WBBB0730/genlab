@@ -98,7 +98,7 @@ export function resolveProject(
 
   if (!project.remote) {
     throw new CliError(
-      `当前代码项目未登记，运行 genhub project <名字> 登记：${project.path}`,
+      `当前代码项目未登记，运行 genlab project <名字> 登记：${project.path}`,
     )
   }
 
@@ -106,7 +106,7 @@ export function resolveProject(
 
   if (map.projects.some((entry) => entry.name === name)) {
     throw new CliError(
-      `项目名 ${name} 已被其他代码项目使用，运行 genhub project <名字> 指定`,
+      `项目名 ${name} 已被其他代码项目使用，运行 genlab project <名字> 指定`,
     )
   }
 

@@ -1,4 +1,4 @@
-/** genhub init：写入配置文件（API Key 与库目录），先验证 Key 可用。 */
+/** genlab init：写入配置文件（API Key 与库目录），先验证 Key 可用。 */
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -11,7 +11,7 @@ import { configFile } from '../config'
 import { CliError } from '../errors'
 import { getKieCredits } from '../kie/client'
 
-const DEFAULT_LIBRARY = '~/GenHub'
+const DEFAULT_LIBRARY = '~/GenLab'
 
 async function readConfig(file: string): Promise<Record<string, string>> {
   try {
@@ -50,7 +50,7 @@ export async function initCommand(args: { key?: string; library?: string }) {
   const existing = await readConfig(file)
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
   let key = args.key ?? existing.KIE_API_KEY
-  let library = args.library ?? existing.GENHUB_LIBRARY
+  let library = args.library ?? existing.GENLAB_LIBRARY
 
   if (interactive && !args.key) {
     const input = answered(
@@ -70,7 +70,7 @@ export async function initCommand(args: { key?: string; library?: string }) {
     library = answered(
       await p.text({
         message: '库目录',
-        initialValue: existing.GENHUB_LIBRARY ?? DEFAULT_LIBRARY,
+        initialValue: existing.GENLAB_LIBRARY ?? DEFAULT_LIBRARY,
         validate: (value) => (value ? undefined : '不能为空'),
       }),
     )
@@ -92,7 +92,7 @@ export async function initCommand(args: { key?: string; library?: string }) {
   await mkdir(path.dirname(file), { recursive: true })
   await writeFileAtomic(
     file,
-    `KIE_API_KEY=${JSON.stringify(key)}\nGENHUB_LIBRARY=${JSON.stringify(library)}\n`,
+    `KIE_API_KEY=${JSON.stringify(key)}\nGENLAB_LIBRARY=${JSON.stringify(library)}\n`,
     { mode: 0o600 },
   )
 

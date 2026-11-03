@@ -1,20 +1,20 @@
 {
-  "name": "genhub",
+  "name": "genlab",
   "type": "module",
   "version": "0.1.0",
   "description": "给本地 agent 用的 AI 媒体生成命令行工具（kie.ai），产物与完整生成记录保存在本机",
   "author": "WBBB",
   "license": "MIT",
-  "homepage": "https://github.com/WBBB0730/genhub#readme",
+  "homepage": "https://github.com/WBBB0730/genlab#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WBBB0730/genhub.git"
+    "url": "git+https://github.com/WBBB0730/genlab.git"
   },
   "publishConfig": {
     "access": "public"
   },
   "bin": {
-    "genhub": "./dist/cli.mjs"
+    "genlab": "dist/cli.mjs"
   },
   "files": [
     "dist"

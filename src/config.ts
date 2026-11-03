@@ -3,13 +3,13 @@ import path from 'node:path'
 
 import { CliError } from './errors'
 
-type EnvName = 'KIE_API_KEY' | 'GENHUB_LIBRARY'
+type EnvName = 'KIE_API_KEY' | 'GENLAB_LIBRARY'
 
-/** 配置文件：$XDG_CONFIG_HOME/genhub/.env，默认 ~/.config/genhub/.env。 */
+/** 配置文件：$XDG_CONFIG_HOME/genlab/.env，默认 ~/.config/genlab/.env。 */
 export function configFile(): string {
   const base = process.env.XDG_CONFIG_HOME || path.join(homedir(), '.config')
 
-  return path.join(base, 'genhub', '.env')
+  return path.join(base, 'genlab', '.env')
 }
 
 let envLoaded = false
@@ -43,16 +43,16 @@ export function requireEnv(name: EnvName): string {
   return value
 }
 
-/** 库的根目录：GENHUB_LIBRARY，支持 ~ 开头，必须是绝对路径。 */
+/** 库的根目录：GENLAB_LIBRARY，支持 ~ 开头，必须是绝对路径。 */
 export function libraryRoot(): string {
-  const raw = requireEnv('GENHUB_LIBRARY')
+  const raw = requireEnv('GENLAB_LIBRARY')
   const expanded =
     raw === '~' || raw.startsWith('~/')
       ? path.join(homedir(), raw.slice(1))
       : raw
 
   if (!path.isAbsolute(expanded)) {
-    throw new CliError(`GENHUB_LIBRARY 必须是绝对路径：${raw}`)
+    throw new CliError(`GENLAB_LIBRARY 必须是绝对路径：${raw}`)
   }
 
   return path.normalize(expanded)

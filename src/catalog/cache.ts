@@ -1,4 +1,4 @@
-/** 模型目录与 schema 的本地缓存：$XDG_CACHE_HOME/genhub（默认 ~/.cache/genhub），一天有效。 */
+/** 模型目录与 schema 的本地缓存：$XDG_CACHE_HOME/genlab（默认 ~/.cache/genlab），一天有效。 */
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -12,7 +12,7 @@ type Entry<T> = { fetchedAt: number; value: T }
 export function cacheDir(): string {
   const base = process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache')
 
-  return path.join(base, 'genhub')
+  return path.join(base, 'genlab')
 }
 
 /** 缓存命中且未过期时直接返回，否则调用 load 并写入缓存；refresh 强制重新获取。 */

@@ -98,7 +98,7 @@ export async function uploadKieFile(filePath: string): Promise<string> {
   const form = new FormData()
 
   form.append('file', await openAsBlob(filePath), path.basename(filePath))
-  form.append('uploadPath', 'genhub')
+  form.append('uploadPath', 'genlab')
 
   const body = await kieFetch<{ data?: { downloadUrl?: string } }>(
     `${UPLOAD_BASE_URL}/api/file-stream-upload`,

@@ -15,7 +15,7 @@ let cacheHome: string
 const original = process.env.XDG_CACHE_HOME
 
 beforeEach(async () => {
-  cacheHome = await mkdtemp(path.join(tmpdir(), 'genhub-cache-'))
+  cacheHome = await mkdtemp(path.join(tmpdir(), 'genlab-cache-'))
   process.env.XDG_CACHE_HOME = cacheHome
   await writeCatalogCache(cacheHome)
 })

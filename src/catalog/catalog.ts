@@ -66,7 +66,7 @@ export async function findModel(id: string): Promise<CatalogModel> {
     (await listModels(true)).find((item) => item.model === id)
 
   if (!model) {
-    throw new CliError(`未知模型：${id}（用 genhub models 查看）`)
+    throw new CliError(`未知模型：${id}（用 genlab models 查看）`)
   }
 
   const kind = kindForModel(model)

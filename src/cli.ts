@@ -51,7 +51,7 @@ function librarySynced<TArgs extends unknown[]>(
   })
 }
 
-const program = new Command('genhub')
+const program = new Command('genlab')
   .description('AI 媒体生成（kie.ai），产物与生成记录保存在本机的库里')
   .version(packageJson.version)
   .showHelpAfterError()
@@ -60,7 +60,7 @@ function generationOptions(command: Command, requireModel: boolean) {
   return command
     .option(
       '-m, --model <id>',
-      requireModel ? '模型（必填，见 genhub models）' : '模型，默认沿用',
+      requireModel ? '模型（必填，见 genlab models）' : '模型，默认沿用',
     )
     .option(
       '-p, --param <key=value>',
