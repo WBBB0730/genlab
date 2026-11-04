@@ -40,10 +40,11 @@ export async function importAsset(
     const fileName = versionFileName(1, media.extension)
     const timestamp = now()
     const record: AssetRecord = {
-      schema: 1,
+      schema: 2,
       id: randomUUID(),
       kind: media.kind,
       currentVersion: 1,
+      lastVersion: 1,
       createdAt: timestamp,
       generations: [],
       versions: [
@@ -107,7 +108,7 @@ export async function deleteVersion(location: AssetLocation, number: number) {
     const version = findVersion(record, number)
 
     if (!isLeaf(record.versions, number)) {
-      throw new CliError(`v${number} 有派生版本，不能删除`)
+      throw new CliError(`v${number} 有子版本，不能删除`)
     }
 
     if (record.versions.length <= 1) {

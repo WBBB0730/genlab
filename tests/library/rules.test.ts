@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { VersionRecord } from '../../src/library/record'
 import {
+  allocateVersion,
   isLeaf,
   nextCurrentAfterDelete,
   nextCurrentAfterFailure,
-  nextVersionNumber,
 } from '../../src/library/rules'
 
 type Lite = Pick<
@@ -92,7 +92,7 @@ describe('nextCurrentAfterDelete', () => {
   })
 })
 
-describe('isLeaf / nextVersionNumber', () => {
+describe('isLeaf / allocateVersion', () => {
   it('有子版本的不是叶子', () => {
     const versions = [v({ number: 1 }), v({ number: 2, sourceVersion: 1 })]
 
@@ -100,8 +100,11 @@ describe('isLeaf / nextVersionNumber', () => {
     expect(isLeaf(versions, 2)).toBe(true)
   })
 
-  it('版本号接着最大值往后编，删过的号不复用', () => {
-    expect(nextVersionNumber([])).toBe(1)
-    expect(nextVersionNumber([v({ number: 1 }), v({ number: 4 })])).toBe(5)
+  it('版本号接着分配过的最大号往后编', () => {
+    const record = { lastVersion: 0 }
+
+    expect(allocateVersion(record)).toBe(1)
+    expect(allocateVersion(record)).toBe(2)
+    expect(record.lastVersion).toBe(2)
   })
 })

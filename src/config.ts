@@ -37,7 +37,7 @@ export function requireEnv(name: EnvName): string {
   const value = process.env[name]?.trim()
 
   if (!value) {
-    throw new CliError(`缺少配置 ${name}：在 ${configFile()} 中设置`)
+    throw new CliError(`缺少配置 ${name}：运行 genlab init`)
   }
 
   return value

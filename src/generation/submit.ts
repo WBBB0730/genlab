@@ -40,7 +40,7 @@ import {
   updateAsset,
 } from '../library/record'
 import type { AssetRecord, ReferenceRecord } from '../library/record'
-import { nextGenerationId, nextVersionNumber } from '../library/rules'
+import { allocateVersion, nextGenerationId } from '../library/rules'
 import { findOwningAsset } from '../library/scan'
 
 export type SubmitDeps = {
@@ -105,10 +105,11 @@ export async function createAsset(
       deps,
     )
     const record: AssetRecord = {
-      schema: 1,
+      schema: 2,
       id: randomUUID(),
       kind: plan.model.kind,
       currentVersion: 0,
+      lastVersion: 0,
       createdAt: now(),
       generations: [],
       versions: [],
@@ -255,7 +256,7 @@ async function planGeneration(
   const tasks = options.count ?? 1
 
   if (!Number.isInteger(tasks) || tasks < 1 || tasks > MAX_TASKS) {
-    throw new CliError(`count 范围是 1–${MAX_TASKS}`)
+    throw new CliError(`--count 范围是 1–${MAX_TASKS}`)
   }
 
   const model = await findModel(options.model)
@@ -447,9 +448,8 @@ function appendGeneration(
   const copies = new Map(
     references.map((reference) => [reference.source, reference.file]),
   )
-  const base = nextVersionNumber(record.versions)
   const versions = orders.taskIds.map((taskId, position) => {
-    const number = base + position
+    const number = allocateVersion(record)
 
     record.versions.push({
       number,

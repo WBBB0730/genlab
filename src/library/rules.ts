@@ -1,13 +1,16 @@
 /** 版本规则（纯函数，见 docs/adr/0001-asset-centric-model.md）。 */
-import type { VersionRecord } from './record'
+import type { AssetRecord, VersionRecord } from './record'
 
 type VersionLite = Pick<
   VersionRecord,
   'number' | 'state' | 'generation' | 'position' | 'sourceVersion'
 >
 
-export function nextVersionNumber(versions: VersionLite[]): number {
-  return Math.max(0, ...versions.map((version) => version.number)) + 1
+/** 分配新版本号（就地更新 lastVersion）：接着分配过的最大号往后编，删过的号不复用。 */
+export function allocateVersion(record: Pick<AssetRecord, 'lastVersion'>) {
+  record.lastVersion += 1
+
+  return record.lastVersion
 }
 
 export function nextGenerationId(generations: Array<{ id: number }>): number {

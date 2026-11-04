@@ -28,12 +28,12 @@ export type WaitOptions = { wait: boolean; timeout: number }
 export type GenerationArgs = WaitOptions &
   ProjectOption & {
     model?: string
-    param: string[]
+    param?: string[]
     count?: number
   }
 
 function toGenerateOptions(args: GenerationArgs): GenerateOptions {
-  return { model: args.model, params: args.param, count: args.count }
+  return { model: args.model, params: args.param ?? [], count: args.count }
 }
 
 /**

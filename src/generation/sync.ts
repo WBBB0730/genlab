@@ -19,7 +19,7 @@ import type { KieRecord, KieResultItem } from '../kie/record'
 import { inspectMedia } from '../library/media'
 import { versionFileName } from '../library/paths'
 import { now, readAsset, updateAsset } from '../library/record'
-import { nextVersionNumber } from '../library/rules'
+import { allocateVersion } from '../library/rules'
 import type { AssetRecord, VersionRecord } from '../library/record'
 import { findAssetDirs } from '../library/scan'
 
@@ -129,7 +129,7 @@ export async function collectLibrary(
   })
 }
 
-/** 同步一批素材里所有生成中的版本；返回过程中遇到的问题（不中断其余任务）。 */
+/** 收取一批素材里所有生成中的版本；返回过程中遇到的问题（不中断其余任务）。 */
 export async function syncAssets(
   assetDirs: string[],
   deps: SyncDeps = defaultDeps,
@@ -206,7 +206,7 @@ async function syncAsset(dir: string, deps: SyncDeps): Promise<string[]> {
       await syncTask(dir, record, taskId, deps)
     } catch (error) {
       warnings.push(
-        `${path.basename(dir)} 任务 ${taskId} 同步失败：${(error as Error).message}`,
+        `${path.basename(dir)} 任务 ${taskId} 收取失败：${(error as Error).message}`,
       )
     }
   }
@@ -313,7 +313,7 @@ function appendResultVersion(
     .map((version) => version.position ?? 0)
   const version: VersionRecord = {
     ...lead,
-    number: nextVersionNumber(record.versions),
+    number: allocateVersion(record),
     state: 'generating',
     position: Math.max(...positions) + 1,
     resultIndex,

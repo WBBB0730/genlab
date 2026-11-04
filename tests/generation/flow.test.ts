@@ -558,7 +558,7 @@ describe('迭代', () => {
     )
   })
 
-  it('删除：有派生版本的不能删；删光一次生成时连同参考输入一起删', async () => {
+  it('删除：有子版本的不能删；删光一次生成时连同参考输入一起删；删过的号不复用', async () => {
     const kie = fakeKie()
     const location = await readyImage(kie)
     const reference = path.join(root, 'ref.png')
@@ -576,7 +576,7 @@ describe('迭代', () => {
     kie.records.set('task-2', success(['https://r/2.png']))
     await syncAssets([location.dir], kie.sync)
 
-    await expect(deleteVersion(location, 1)).rejects.toThrow('有派生版本')
+    await expect(deleteVersion(location, 1)).rejects.toThrow('有子版本')
     await deleteVersion(location, 2)
 
     const record = await readAsset(location.dir)
@@ -584,6 +584,15 @@ describe('迭代', () => {
     expect(record.generations.map((generation) => generation.id)).toEqual([1])
     expect(await readdir(path.join(location.dir, 'references'))).toEqual([])
     await expect(deleteVersion(location, 1)).rejects.toThrow('至少保留一个版本')
+
+    const { versions } = await generateInAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=再来'] },
+      kie.submit,
+    )
+
+    expect(versions).toEqual([3])
   })
 
   it('导入：外部文件成为就绪的 v1，库内产物作为参考输入时记下出处', async () => {

@@ -41,10 +41,11 @@ const project: ProjectContext = {
 }
 
 const record: AssetRecord = {
-  schema: 1,
+  schema: 2,
   id: 'a',
   kind: 'audio',
   currentVersion: 1,
+  lastVersion: 4,
   createdAt: '',
   generations: [],
   versions: [

@@ -75,13 +75,32 @@ export type VersionRecord = {
 }
 
 export type AssetRecord = {
-  schema: 1
+  schema: 2
   id: string
   kind: MediaKind
   currentVersion: number
+  /** 分配过的最大版本号：新版本接着它往后编，删过的号不复用。 */
+  lastVersion: number
   createdAt: string
   generations: GenerationRecord[]
   versions: VersionRecord[]
+}
+
+/** 第 1 版记录格式：没有 lastVersion。 */
+type AssetRecordV1 = Omit<AssetRecord, 'schema' | 'lastVersion'> & {
+  schema: 1
+}
+
+/** 第 1 版记录没记分配过的最大号，只能取现有版本的最大号；下次写入时存为第 2 版。 */
+function upgradeV1({ schema: _schema, ...record }: AssetRecordV1): AssetRecord {
+  return {
+    schema: 2,
+    ...record,
+    lastVersion: Math.max(
+      0,
+      ...record.versions.map((version) => version.number),
+    ),
+  }
 }
 
 export function assetFile(assetDir: string): string {
@@ -101,9 +120,13 @@ export async function readAsset(assetDir: string): Promise<AssetRecord> {
     throw error
   }
 
-  const record = JSON.parse(text) as AssetRecord
+  const record = JSON.parse(text) as AssetRecord | AssetRecordV1
 
-  if (record.schema !== 1) {
+  if (record.schema === 1) {
+    return upgradeV1(record)
+  }
+
+  if (record.schema !== 2) {
     throw new CliError(`无法识别的素材记录版本：${assetFile(assetDir)}`)
   }
 

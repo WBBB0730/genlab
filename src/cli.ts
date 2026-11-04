@@ -52,7 +52,8 @@ function positiveInteger(value: string): number {
   return parsed
 }
 
-function collect(value: string, previous: string[]): string[] {
+/** 可重复的选项：不设默认值，帮助里不显示 (default: [])。 */
+function collect(value: string, previous: string[] = []): string[] {
   return [...previous, value]
 }
 
@@ -69,26 +70,25 @@ function withBackgroundSync<TArgs extends unknown[]>(
   })
 }
 
+// 帮助选项与 help 命令的文案由子命令继承，须在添加子命令前设置。
 const program = new Command('genlab')
   .description(
-    'AI 媒体生成（kie.ai），产物与生成记录保存在本机的库里。使用前先运行 genlab guide 查看完整用法',
+    '用 kie.ai 的模型生成图片、视频、音频，产物与生成记录保存在本机的库里。完整用法：genlab guide',
   )
-  .version(packageJson.version)
+  .version(packageJson.version, '-V, --version', '显示版本号')
+  .helpOption('-h, --help', '显示帮助')
+  .helpCommand('help [command]', '显示命令的帮助')
   .showHelpAfterError()
 
-function generationOptions(command: Command, requireModel: boolean) {
+function generationOptions(command: Command, modelDescription: string) {
   return command
-    .option(
-      '-m, --model <id>',
-      requireModel ? '模型（必填，见 genlab models）' : '模型，默认沿用',
-    )
+    .option('-m, --model <id>', modelDescription)
     .option(
       '-p, --param <key=value>',
-      '模型参数，可重复；key:=JSON 传 JSON 值，值写 @文件 上传本机文件',
+      '模型参数，可重复；key:=JSON 传 JSON 值，@<路径> 上传本机文件',
       collect,
-      [],
     )
-    .option('-n, --count <n>', '并列发起几个任务', positiveInteger)
+    .option('-n, --count <n>', '并列任务数（1–10，默认 1）', positiveInteger)
 }
 
 function projectOption(command: Command) {
@@ -111,21 +111,21 @@ function waitOptions(command: Command) {
 
 program
   .command('guide')
-  .description('输出完整用法：概念、流程、参数写法、规则与全部命令')
+  .description('输出完整用法：概念、流程、参数写法、规则与命令参考')
   .action(() => guideCommand(program, GUIDE_FILE))
 
 program
   .command('init')
   .description('写入配置（kie.ai API Key 与库目录），可顺带安装 skill')
   .option('--key <key>', 'kie.ai API Key')
-  .option('--library <dir>', '库目录')
+  .option('--library <dir>', '库目录（绝对路径，可用 ~ 开头）')
   .option('--skill', '安装 skill，不再询问')
   .option('--no-skill', '不安装 skill')
   .action(action(initCommand))
 
 const skill = program
   .command('skill')
-  .description('管理 skill：让 agent 需要生成媒体时自动想到 genlab')
+  .description('安装、更新或卸载 genlab skill，让 agent 能发现 genlab')
 
 skill
   .command('add', { isDefault: true })
@@ -147,7 +147,7 @@ program
   .description('列出 kie 模型；指定模型时输出价格与参数表')
   .argument('[id]', '模型标识')
   .option('--kind <kind>', '按类型筛选：image / video / audio')
-  .option('--search <text>', '按模型标识、供应商、标题筛选')
+  .option('--search <text>', '按模型标识、供应商、名称筛选')
   .option('--refresh', '忽略缓存，重新获取')
   .action(action(modelsCommand))
 
@@ -164,7 +164,7 @@ project
 
 project
   .command('link')
-  .description('把当前目录关联到项目；不属于任何项目时用 default')
+  .description('把当前目录关联到项目；不属于任何代码项目时用 default')
   .argument('<name>', '项目名')
   .action(action(projectLinkCommand))
 
@@ -174,8 +174,8 @@ projectOption(
       program
         .command('create')
         .description('新建素材并发起第一次生成')
-        .argument('<asset>', '素材路径，如 characters/hero'),
-      true,
+        .argument('<asset>', '素材路径：[文件夹/]素材名，如 characters/hero'),
+      '模型标识（必填，见 genlab models）',
     ),
   ),
 ).action(withBackgroundSync(createCommand))
@@ -188,7 +188,7 @@ projectOption(
         .description('在已有素材里发起生成')
         .argument('<asset>', '素材路径')
         .option('--from <version>', '沿用某个版本的生成输入（重新生成）'),
-      false,
+      '模型标识；用 --from 时默认沿用原模型',
     ),
   ),
 ).action(withBackgroundSync(generateCommand))
@@ -203,7 +203,7 @@ projectOption(
         )
         .argument('<asset>', '素材路径')
         .argument('<version>', '源版本号'),
-      false,
+      '模型标识，默认沿用源版本的模型',
     ),
   ),
 ).action(withBackgroundSync(editCommand))
@@ -214,7 +214,7 @@ projectOption(
       .command('retry')
       .description('原地重试失败的版本')
       .argument('<asset>', '素材路径')
-      .argument('<version>', '版本号'),
+      .argument('<version>', '版本号，如 3 或 v3'),
   ),
 ).action(withBackgroundSync(retryCommand))
 
@@ -236,23 +236,23 @@ projectOption(
     .command('import')
     .description('把外部文件导入为新素材的第一个版本')
     .argument('<asset>', '素材路径')
-    .argument('<file>', '文件'),
+    .argument('<file>', '要导入的文件'),
 ).action(withBackgroundSync(importCommand))
 
 projectOption(
   program
     .command('use')
-    .description('设为当前版本')
+    .description('把就绪的版本设为当前版本')
     .argument('<asset>', '素材路径')
-    .argument('<version>', '版本号'),
+    .argument('<version>', '版本号，如 3 或 v3'),
 ).action(withBackgroundSync(useCommand))
 
 projectOption(
   program
     .command('delete')
-    .description('删除版本（只能删没有派生版本的版本）')
+    .description('删除没有子版本的版本')
     .argument('<asset>', '素材路径')
-    .argument('<version>', '版本号'),
+    .argument('<version>', '版本号，如 3 或 v3'),
 ).action(withBackgroundSync(deleteCommand))
 
 projectOption(
@@ -266,7 +266,7 @@ projectOption(
   program
     .command('list')
     .description('列出当前项目的素材')
-    .argument('[folder]', '只列某个文件夹')
+    .argument('[folder]', '只列这个文件夹下的素材')
     .option('--kind <kind>', '按类型筛选：image / video / audio'),
 ).action(withBackgroundSync(listCommand))
 
