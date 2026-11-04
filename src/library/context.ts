@@ -62,17 +62,21 @@ async function projectsHint(root: string): Promise<string> {
   return `；已有项目：${(await listProjects(root)).join('、')}`
 }
 
-/** 项目必须已存在；default 除外，首次放入素材时自动建好。 */
+/**
+ * 项目必须已存在；default 除外，首次放入素材时自动建好。missing 是项目不存在时的
+ * 提示，默认提示新建。
+ */
 export async function openProject(
   root: string,
   name: string,
+  missing?: string,
 ): Promise<ProjectContext> {
   const validName = validateName(name, '项目名')
   const dir = path.join(root, validName)
 
   if (validName !== DEFAULT_PROJECT && !(await isDirectory(dir))) {
     throw new CliError(
-      `项目不存在：${validName}，运行 genlab project create ${validName} 新建${await projectsHint(root)}`,
+      `${missing ?? `项目不存在：${validName}，运行 genlab project create ${validName} 新建`}${await projectsHint(root)}`,
     )
   }
 
@@ -85,15 +89,25 @@ export async function resolveProject(
   cwd: string,
   override?: string,
 ): Promise<ProjectContext> {
-  const name = override ?? (await findLink(cwd))?.project
+  if (override != null) {
+    return openProject(root, override)
+  }
 
-  if (name == null) {
+  const link = await findLink(cwd)
+
+  if (link == null) {
     throw new CliError(
       `当前目录未关联项目：运行 genlab project link <项目> 关联，不属于任何项目时用 ${DEFAULT_PROJECT}${await projectsHint(root)}`,
     )
   }
 
-  return openProject(root, name)
+  // 关联的项目文件夹不在了（如改名或删除）：工具判断不了该换成哪个，让 agent 问用户；
+  // 不提示新建，以免建出同名的空项目。
+  return openProject(
+    root,
+    link.project,
+    `当前目录关联的项目不存在：${link.project}，可能已改名或删除；问用户要关联到哪个项目，再运行 genlab project link <项目>`,
+  )
 }
 
 export function currentProject(override?: string): Promise<ProjectContext> {

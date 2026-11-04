@@ -82,6 +82,14 @@ describe('resolveProject', () => {
     )
   })
 
+  it('关联的项目不存在时提示问用户后重新关联，而不是新建', async () => {
+    await writeLink(code, 'pixel')
+
+    await expect(resolveProject(library, code)).rejects.toThrow(
+      /关联的项目不存在：pixel，可能已改名或删除；问用户要关联到哪个项目，再运行 genlab project link <项目>；已有项目：default、pixel-quest/,
+    )
+  })
+
   it('项目不存在时报错；default 无需事先建好', async () => {
     await expect(resolveProject(library, code, 'pixel')).rejects.toThrow(
       'genlab project create pixel',

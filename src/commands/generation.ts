@@ -21,6 +21,7 @@ import { findAssetDirs } from '../library/scan'
 import { presentAsset } from '../present'
 
 import { warn } from './output'
+import { startBackgroundSync } from './sync'
 
 export type WaitOptions = { wait: boolean; timeout: number }
 
@@ -35,7 +36,10 @@ function toGenerateOptions(args: GenerationArgs): GenerateOptions {
   return { model: args.model, params: args.param, count: args.count }
 }
 
-/** 部分下单失败的原因作为警告输出；按需等待新版本完成，再输出这些版本的状态。 */
+/**
+ * 部分下单失败的原因作为警告输出；按需等待新版本完成（先启动后台收取，等待只读记录），
+ * 再输出这些版本的状态。
+ */
 async function finish(
   project: ProjectContext,
   location: AssetLocation,
@@ -45,12 +49,11 @@ async function finish(
   errors.forEach((error) => warn(`部分任务下单失败：${error}`))
 
   if (options.wait) {
-    const { warnings } = await waitForVersions(
+    startBackgroundSync()
+    await waitForVersions(
       [{ dir: location.dir, versions }],
       options.timeout * 1000,
     )
-
-    warnings.forEach(warn)
   }
 
   return presentAsset(
@@ -116,7 +119,7 @@ export async function retryCommand(
   return finish(project, location, submission, args)
 }
 
-/** 等待某个素材、或当前项目里全部生成中的版本。 */
+/** 等待某个素材、或当前项目里全部生成中的版本（先启动后台收取，等待只读记录）。 */
 export async function waitCommand(
   assetPath: string | undefined,
   args: { timeout: number } & ProjectOption,
@@ -141,9 +144,8 @@ export async function waitCommand(
     }
   }
 
-  const { warnings } = await waitForVersions(targets, args.timeout * 1000)
-
-  warnings.forEach(warn)
+  startBackgroundSync()
+  await waitForVersions(targets, args.timeout * 1000)
 
   return Promise.all(
     targets.map(async ({ dir, versions }) =>

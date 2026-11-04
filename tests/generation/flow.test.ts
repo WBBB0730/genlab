@@ -3,6 +3,7 @@ import { access, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import lockfile from 'proper-lockfile'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -12,7 +13,11 @@ import {
   retryVersion,
 } from '../../src/generation/submit'
 import type { SubmitDeps } from '../../src/generation/submit'
-import { syncAssets } from '../../src/generation/sync'
+import {
+  collectLibrary,
+  syncAssets,
+  waitForVersions,
+} from '../../src/generation/sync'
 import type { SyncDeps } from '../../src/generation/sync'
 import type * as KieClient from '../../src/kie/client'
 import type { KieTaskRequest } from '../../src/kie/client'
@@ -612,5 +617,69 @@ describe('迭代', () => {
       (await readAsset(path.join(project.dir, '新立绘'))).generations[0]
         .references[0].origin,
     ).toEqual({ asset: 'p/导入/旧立绘', version: 1 })
+  })
+})
+
+describe('收取者', () => {
+  /** 模拟另一个进程正在收取：占住全库的收取者锁。 */
+  function holdCollector() {
+    return lockfile.lock(root, { lockfilePath: path.join(root, '.sync.lock') })
+  }
+
+  async function pendingAsset(kie: ReturnType<typeof fakeKie>, name: string) {
+    const location = locateAsset(project, name)
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'] },
+      kie.submit,
+    )
+
+    return location
+  }
+
+  it('后台收取：收下全库已完成的生成，没有生成中的版本后退出', async () => {
+    const kie = fakeKie()
+    const a = await pendingAsset(kie, 'a')
+    const b = await pendingAsset(kie, '文件夹/b')
+
+    kie.records.set('task-1', success(['https://r/1.png']))
+    kie.records.set('task-2', success(['https://r/2.png']))
+    await collectLibrary(root, kie.sync)
+
+    expect((await readAsset(a.dir)).versions[0].state).toBe('ready')
+    expect((await readAsset(b.dir)).versions[0].state).toBe('ready')
+  })
+
+  it('已有收取者时后台收取立即退出，不查询 kie', async () => {
+    const kie = fakeKie()
+    const location = await pendingAsset(kie, 'a')
+    const getRecord = vi.fn(kie.sync.getRecord)
+
+    kie.records.set('task-1', success(['https://r/1.png']))
+
+    const release = await holdCollector()
+
+    try {
+      await collectLibrary(root, { ...kie.sync, getRecord })
+    } finally {
+      await release()
+    }
+
+    expect(getRecord).not.toHaveBeenCalled()
+    expect((await readAsset(location.dir)).versions[0].state).toBe('generating')
+  })
+
+  it('等待只读记录：没收下时到时返回未完成，收下后返回完成', async () => {
+    const kie = fakeKie()
+    const location = await pendingAsset(kie, 'a')
+    const targets = [{ dir: location.dir, versions: [1] }]
+
+    kie.records.set('task-1', success(['https://r/1.png']))
+
+    expect(await waitForVersions(targets, 1)).toBe(false)
+    await syncAssets([location.dir], kie.sync)
+    expect(await waitForVersions(targets, 1_000)).toBe(true)
   })
 })

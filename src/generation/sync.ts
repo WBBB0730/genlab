@@ -2,11 +2,16 @@
  * 向 kie 求证并收取产物：按任务分组，一次 recordInfo 推进同一任务的全部版本。
  * 产物先下载到素材文件夹里的临时文件，加锁确认版本仍在等待该任务后再就位，
  * 因此多个进程同时收取也只会落一份（幂等）。
+ *
+ * 收取只在后台收取进程里进行，全库同一时间只有一个（见 ADR-0007）：每条素材命令结束时、
+ * 以及开始等待时启动它，收完或超过时限即退出；等待只读记录。
  */
 import { rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { setTimeout as sleep } from 'node:timers/promises'
+
+import lockfile from 'proper-lockfile'
 
 import { downloadFile, getKieRecord } from '../kie/client'
 import { parseKieRecord } from '../kie/record'
@@ -16,6 +21,7 @@ import { versionFileName } from '../library/paths'
 import { now, readAsset, updateAsset } from '../library/record'
 import { nextVersionNumber } from '../library/rules'
 import type { AssetRecord, VersionRecord } from '../library/record'
+import { findAssetDirs } from '../library/scan'
 
 import { failVersion, fulfillVersion } from './state'
 import type { ProductInfo } from './state'
@@ -33,6 +39,95 @@ const defaultDeps: SyncDeps = {
 }
 
 const POLL_INTERVAL_MS = 5_000
+
+/** 收取者锁：库根目录下的点目录，扫描库时跳过。 */
+const COLLECTOR_LOCK = '.sync.lock'
+
+/** 后台收取进程最多运行的时长；超过后退出，下一条命令再启动。 */
+const COLLECTOR_MAX_MS = 30 * 60_000
+
+/**
+ * 以全库唯一收取者的身份执行 run；已有收取者时不执行。锁失效（如系统休眠）时可能
+ * 短暂出现两个收取者，收取是幂等的，不影响结果。
+ */
+async function asCollector(root: string, run: () => Promise<void>) {
+  let release: () => Promise<void>
+
+  try {
+    release = await lockfile.lock(root, {
+      lockfilePath: path.join(root, COLLECTOR_LOCK),
+      onCompromised: () => {},
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') {
+      return
+    }
+
+    throw error
+  }
+
+  try {
+    await run()
+  } finally {
+    // 锁失效后已视为释放，再释放会报 ERELEASED。
+    await release().catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ERELEASED') {
+        throw error
+      }
+    })
+  }
+}
+
+/** 仍有生成中版本的素材；读不出记录的跳过。 */
+async function pendingDirs(dirs: string[]): Promise<string[]> {
+  const pending = await Promise.all(
+    dirs.map(async (dir) => {
+      try {
+        const record = await readAsset(dir)
+
+        return record.versions.some((version) => version.state === 'generating')
+      } catch {
+        return false
+      }
+    }),
+  )
+
+  return dirs.filter((_, index) => pending[index])
+}
+
+/**
+ * 后台收取：作为全库唯一的收取者轮询，每轮重新扫描库（包括期间新发起的生成），
+ * 全部收完或超过时限后返回；已有收取者时立即返回。
+ */
+export async function collectLibrary(
+  root: string,
+  deps: SyncDeps = defaultDeps,
+) {
+  const pending = async () => pendingDirs(await findAssetDirs(root))
+
+  await asCollector(root, async () => {
+    const deadline = Date.now() + COLLECTOR_MAX_MS
+
+    for (;;) {
+      const dirs = await pending()
+
+      if (dirs.length === 0) {
+        return
+      }
+
+      await syncAssets(dirs, deps)
+
+      if (
+        (await pending()).length === 0 ||
+        Date.now() + POLL_INTERVAL_MS > deadline
+      ) {
+        return
+      }
+
+      await sleep(POLL_INTERVAL_MS)
+    }
+  })
+}
 
 /** 同步一批素材里所有生成中的版本；返回过程中遇到的问题（不中断其余任务）。 */
 export async function syncAssets(
@@ -52,31 +147,22 @@ export async function syncAssets(
 }
 
 /**
- * 轮询直到目标版本全部到达终态或超时；返回是否全部完成与过程中的问题。
- * targets 的 versions 为空表示该素材里所有生成中的版本。
+ * 轮询记录，直到目标版本全部到达终态或超时；返回是否全部完成。只读记录，收取由后台
+ * 收取进程负责。targets 的 versions 为空表示该素材里所有生成中的版本。
  */
 export async function waitForVersions(
   targets: Array<{ dir: string; versions?: number[] }>,
   timeoutMs: number,
-  deps: SyncDeps = defaultDeps,
-): Promise<{ done: boolean; warnings: string[] }> {
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
-  const warnings = new Set<string>()
 
   for (;;) {
-    for (const warning of await syncAssets(
-      targets.map((target) => target.dir),
-      deps,
-    )) {
-      warnings.add(warning)
-    }
-
     if (await allSettled(targets)) {
-      return { done: true, warnings: [...warnings] }
+      return true
     }
 
     if (Date.now() + POLL_INTERVAL_MS > deadline) {
-      return { done: false, warnings: [...warnings] }
+      return false
     }
 
     await sleep(POLL_INTERVAL_MS)

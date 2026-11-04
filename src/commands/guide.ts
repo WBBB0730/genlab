@@ -6,7 +6,11 @@ import type { Command } from 'commander'
 /** 手写的使用说明，后附由命令定义生成的命令参考，与已安装的版本一致。 */
 export async function guideCommand(program: Command, file: URL) {
   const guide = await readFile(file, 'utf8')
-  const reference = program.commands
+  // 与帮助输出一致：不含隐藏命令，也不含 commander 自带的 help 命令。
+  const reference = program
+    .createHelp()
+    .visibleCommands(program)
+    .filter((command) => program.commands.includes(command))
     .map((command) => command.helpInformation())
     .join('\n')
 

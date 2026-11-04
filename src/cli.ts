@@ -17,7 +17,6 @@ import {
   listCommand,
   modelsCommand,
   showCommand,
-  syncLibrary,
   useCommand,
 } from './commands/library'
 import { initCommand } from './commands/init'
@@ -32,8 +31,12 @@ import {
   skillRemoveCommand,
   skillUpdateCommand,
 } from './commands/skill'
+import { startBackgroundSync, syncCommand } from './commands/sync'
 
-/** 单次命令默认最多等待的秒数：agent 执行命令通常 2 分钟超时。 */
+/**
+ * 单次命令默认最多等待的秒数：Claude Code 默认在前台等一条命令 2 分钟，超过转入后台，
+ * 留在这之内 agent 能直接拿到结果。
+ */
 const DEFAULT_TIMEOUT_SECONDS = 90
 
 /** 使用说明与入口同目录：打包时由 tsdown 复制到 dist。 */
@@ -53,14 +56,16 @@ function collect(value: string, previous: string[]): string[] {
   return [...previous, value]
 }
 
-/** 先收取库里已完成的生成，再执行命令。 */
-function librarySynced<TArgs extends unknown[]>(
+/** 执行命令，结束后在后台收取库里未完成的生成，不等待（见 ADR-0007）。 */
+function withBackgroundSync<TArgs extends unknown[]>(
   run: (...args: TArgs) => Promise<unknown>,
 ) {
   return action(async (...args: TArgs) => {
-    await syncLibrary()
-
-    return run(...args)
+    try {
+      return await run(...args)
+    } finally {
+      startBackgroundSync()
+    }
   })
 }
 
@@ -173,7 +178,7 @@ projectOption(
       true,
     ),
   ),
-).action(librarySynced(createCommand))
+).action(withBackgroundSync(createCommand))
 
 projectOption(
   waitOptions(
@@ -186,7 +191,7 @@ projectOption(
       false,
     ),
   ),
-).action(librarySynced(generateCommand))
+).action(withBackgroundSync(generateCommand))
 
 projectOption(
   waitOptions(
@@ -201,7 +206,7 @@ projectOption(
       false,
     ),
   ),
-).action(librarySynced(editCommand))
+).action(withBackgroundSync(editCommand))
 
 projectOption(
   waitOptions(
@@ -211,7 +216,7 @@ projectOption(
       .argument('<asset>', '素材路径')
       .argument('<version>', '版本号'),
   ),
-).action(librarySynced(retryCommand))
+).action(withBackgroundSync(retryCommand))
 
 projectOption(
   program
@@ -224,7 +229,7 @@ projectOption(
       positiveInteger,
       DEFAULT_TIMEOUT_SECONDS,
     ),
-).action(action(waitCommand))
+).action(withBackgroundSync(waitCommand))
 
 projectOption(
   program
@@ -232,7 +237,7 @@ projectOption(
     .description('把外部文件导入为新素材的第一个版本')
     .argument('<asset>', '素材路径')
     .argument('<file>', '文件'),
-).action(librarySynced(importCommand))
+).action(withBackgroundSync(importCommand))
 
 projectOption(
   program
@@ -240,7 +245,7 @@ projectOption(
     .description('设为当前版本')
     .argument('<asset>', '素材路径')
     .argument('<version>', '版本号'),
-).action(librarySynced(useCommand))
+).action(withBackgroundSync(useCommand))
 
 projectOption(
   program
@@ -248,14 +253,14 @@ projectOption(
     .description('删除版本（只能删没有派生版本的版本）')
     .argument('<asset>', '素材路径')
     .argument('<version>', '版本号'),
-).action(librarySynced(deleteCommand))
+).action(withBackgroundSync(deleteCommand))
 
 projectOption(
   program
     .command('show')
     .description('查看素材的全部版本、生成输入与文件路径')
     .argument('<asset>', '素材路径'),
-).action(librarySynced(showCommand))
+).action(withBackgroundSync(showCommand))
 
 projectOption(
   program
@@ -263,6 +268,11 @@ projectOption(
     .description('列出当前项目的素材')
     .argument('[folder]', '只列某个文件夹')
     .option('--kind <kind>', '按类型筛选：image / video / audio'),
-).action(librarySynced(listCommand))
+).action(withBackgroundSync(listCommand))
+
+program
+  .command('sync', { hidden: true })
+  .description('后台收取库里未完成的生成（由其他命令自动启动）')
+  .action(syncCommand)
 
 await program.parseAsync()

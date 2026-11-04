@@ -2,8 +2,6 @@
 import path from 'node:path'
 
 import { CliError } from '../errors'
-import { syncAssets } from '../generation/sync'
-import { libraryRoot } from '../config'
 import { currentProject, locateAsset } from '../library/context'
 import type { ProjectOption } from '../library/context'
 import { deleteVersion, importAsset, setCurrentVersion } from '../library/ops'
@@ -15,15 +13,6 @@ import { describeInput, getInputSchema } from '../catalog/schema'
 import { MEDIA_KINDS } from '../library/media'
 import type { MediaKind } from '../library/media'
 import { presentAsset, presentGenerations, presentVersion } from '../present'
-
-import { warn } from './output'
-
-/** 收取库里所有已完成的生成（每条库命令执行前跑一遍，不等待）。 */
-export async function syncLibrary() {
-  const warnings = await syncAssets(await findAssetDirs(libraryRoot()))
-
-  warnings.forEach(warn)
-}
 
 function parseKind(kind: string | undefined): MediaKind | undefined {
   if (kind != null && !MEDIA_KINDS.includes(kind as MediaKind)) {
