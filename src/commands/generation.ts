@@ -10,7 +10,11 @@ import {
 import type { GenerateOptions, Submission } from '../generation/submit'
 import { waitForVersions } from '../generation/sync'
 import { currentProject, locateAsset } from '../library/context'
-import type { AssetLocation, ProjectContext } from '../library/context'
+import type {
+  AssetLocation,
+  ProjectContext,
+  ProjectOption,
+} from '../library/context'
 import { parseVersionArg } from '../library/paths'
 import { readAsset } from '../library/record'
 import { findAssetDirs } from '../library/scan'
@@ -20,11 +24,12 @@ import { warn } from './output'
 
 export type WaitOptions = { wait: boolean; timeout: number }
 
-export type GenerationArgs = WaitOptions & {
-  model?: string
-  param: string[]
-  count?: number
-}
+export type GenerationArgs = WaitOptions &
+  ProjectOption & {
+    model?: string
+    param: string[]
+    count?: number
+  }
 
 function toGenerateOptions(args: GenerationArgs): GenerateOptions {
   return { model: args.model, params: args.param, count: args.count }
@@ -57,7 +62,7 @@ async function finish(
 }
 
 export async function createCommand(assetPath: string, args: GenerationArgs) {
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
   const submission = await createAsset(
     project,
@@ -72,7 +77,7 @@ export async function generateCommand(
   assetPath: string,
   args: GenerationArgs & { from?: string },
 ) {
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
   const submission = await generateInAsset(project, location, {
     ...toGenerateOptions(args),
@@ -87,7 +92,7 @@ export async function editCommand(
   version: string,
   args: GenerationArgs,
 ) {
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
   const submission = await editVersion(
     project,
@@ -102,9 +107,9 @@ export async function editCommand(
 export async function retryCommand(
   assetPath: string,
   version: string,
-  args: WaitOptions,
+  args: WaitOptions & ProjectOption,
 ) {
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
   const submission = await retryVersion(location, parseVersionArg(version))
 
@@ -114,9 +119,9 @@ export async function retryCommand(
 /** 等待某个素材、或当前项目里全部生成中的版本。 */
 export async function waitCommand(
   assetPath: string | undefined,
-  args: { timeout: number },
+  args: { timeout: number } & ProjectOption,
 ) {
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const dirs = assetPath
     ? [locateAsset(project, assetPath).dir]
     : await findAssetDirs(project.dir)

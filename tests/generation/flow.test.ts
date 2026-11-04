@@ -106,7 +106,6 @@ beforeEach(async () => {
     root,
     name: 'p',
     dir: path.join(root, 'p'),
-    codeProject: { remote: null, path: root },
   }
   process.env.XDG_CACHE_HOME = path.join(root, '.cache')
   await writeCatalogCache(process.env.XDG_CACHE_HOME)

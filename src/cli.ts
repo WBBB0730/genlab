@@ -16,14 +16,22 @@ import {
   importCommand,
   listCommand,
   modelsCommand,
-  projectCommand,
   showCommand,
   syncLibrary,
   useCommand,
 } from './commands/library'
 import { initCommand } from './commands/init'
 import { action } from './commands/output'
-import { skillAddCommand, skillRemoveCommand } from './commands/skill'
+import {
+  projectCommand,
+  projectCreateCommand,
+  projectLinkCommand,
+} from './commands/project'
+import {
+  skillAddCommand,
+  skillRemoveCommand,
+  skillUpdateCommand,
+} from './commands/skill'
 
 /** 单次命令默认最多等待的秒数：agent 执行命令通常 2 分钟超时。 */
 const DEFAULT_TIMEOUT_SECONDS = 90
@@ -78,6 +86,13 @@ function generationOptions(command: Command, requireModel: boolean) {
     .option('-n, --count <n>', '并列发起几个任务', positiveInteger)
 }
 
+function projectOption(command: Command) {
+  return command.option(
+    '--project <name>',
+    '本次使用的项目，不改动当前目录的关联',
+  )
+}
+
 function waitOptions(command: Command) {
   return command
     .option('--no-wait', '提交后立即返回，不等待结果')
@@ -109,8 +124,13 @@ const skill = program
 
 skill
   .command('add', { isDefault: true })
-  .description('安装 skill；已安装时覆盖，即为更新（默认）')
+  .description('安装 skill（默认）')
   .action(action(skillAddCommand))
+
+skill
+  .command('update')
+  .description('更新 skill，沿用安装时选的 agent')
+  .action(action(skillUpdateCommand))
 
 skill
   .command('remove')
@@ -126,98 +146,123 @@ program
   .option('--refresh', '忽略缓存，重新获取')
   .action(action(modelsCommand))
 
-program
+const project = program
   .command('project')
-  .description('查看当前代码项目对应的项目；带名字时登记或修改')
-  .argument('[name]', '项目名')
+  .description('查看当前目录关联的项目与库里的全部项目')
   .action(action(projectCommand))
 
-waitOptions(
-  generationOptions(
-    program
-      .command('create')
-      .description('新建素材并发起第一次生成')
-      .argument('<asset>', '素材路径，如 角色/主角立绘'),
-    true,
+project
+  .command('create')
+  .description('新建项目')
+  .argument('<name>', '项目名')
+  .action(action(projectCreateCommand))
+
+project
+  .command('link')
+  .description('把当前目录关联到项目；不属于任何项目时用 default')
+  .argument('<name>', '项目名')
+  .action(action(projectLinkCommand))
+
+projectOption(
+  waitOptions(
+    generationOptions(
+      program
+        .command('create')
+        .description('新建素材并发起第一次生成')
+        .argument('<asset>', '素材路径，如 characters/hero'),
+      true,
+    ),
   ),
 ).action(librarySynced(createCommand))
 
-waitOptions(
-  generationOptions(
-    program
-      .command('generate')
-      .description('在已有素材里发起生成')
-      .argument('<asset>', '素材路径')
-      .option('--from <version>', '沿用某个版本的生成输入（重新生成）'),
-    false,
+projectOption(
+  waitOptions(
+    generationOptions(
+      program
+        .command('generate')
+        .description('在已有素材里发起生成')
+        .argument('<asset>', '素材路径')
+        .option('--from <version>', '沿用某个版本的生成输入（重新生成）'),
+      false,
+    ),
   ),
 ).action(librarySynced(generateCommand))
 
-waitOptions(
-  generationOptions(
-    program
-      .command('edit')
-      .description(
-        'AI 编辑：以某个就绪版本为源版本发起生成，参数里用 @source 引用它',
-      )
-      .argument('<asset>', '素材路径')
-      .argument('<version>', '源版本号'),
-    false,
+projectOption(
+  waitOptions(
+    generationOptions(
+      program
+        .command('edit')
+        .description(
+          'AI 编辑：以某个就绪版本为源版本发起生成，参数里用 @source 引用它',
+        )
+        .argument('<asset>', '素材路径')
+        .argument('<version>', '源版本号'),
+      false,
+    ),
   ),
 ).action(librarySynced(editCommand))
 
-waitOptions(
-  program
-    .command('retry')
-    .description('原地重试失败的版本')
-    .argument('<asset>', '素材路径')
-    .argument('<version>', '版本号'),
+projectOption(
+  waitOptions(
+    program
+      .command('retry')
+      .description('原地重试失败的版本')
+      .argument('<asset>', '素材路径')
+      .argument('<version>', '版本号'),
+  ),
 ).action(librarySynced(retryCommand))
 
-program
-  .command('wait')
-  .description('等待生成中的版本；不指定素材时等待当前项目的全部')
-  .argument('[asset]', '素材路径')
-  .option(
-    '--timeout <seconds>',
-    '最多等待的秒数',
-    positiveInteger,
-    DEFAULT_TIMEOUT_SECONDS,
-  )
-  .action(action(waitCommand))
+projectOption(
+  program
+    .command('wait')
+    .description('等待生成中的版本；不指定素材时等待当前项目的全部')
+    .argument('[asset]', '素材路径')
+    .option(
+      '--timeout <seconds>',
+      '最多等待的秒数',
+      positiveInteger,
+      DEFAULT_TIMEOUT_SECONDS,
+    ),
+).action(action(waitCommand))
 
-program
-  .command('import')
-  .description('把外部文件导入为新素材的第一个版本')
-  .argument('<asset>', '素材路径')
-  .argument('<file>', '文件')
-  .action(librarySynced(importCommand))
+projectOption(
+  program
+    .command('import')
+    .description('把外部文件导入为新素材的第一个版本')
+    .argument('<asset>', '素材路径')
+    .argument('<file>', '文件'),
+).action(librarySynced(importCommand))
 
-program
-  .command('use')
-  .description('设为当前版本')
-  .argument('<asset>', '素材路径')
-  .argument('<version>', '版本号')
-  .action(librarySynced(useCommand))
+projectOption(
+  program
+    .command('use')
+    .description('设为当前版本')
+    .argument('<asset>', '素材路径')
+    .argument('<version>', '版本号'),
+).action(librarySynced(useCommand))
 
-program
-  .command('delete')
-  .description('删除版本（只能删没有派生版本的版本）')
-  .argument('<asset>', '素材路径')
-  .argument('<version>', '版本号')
-  .action(librarySynced(deleteCommand))
+projectOption(
+  program
+    .command('delete')
+    .description('删除版本（只能删没有派生版本的版本）')
+    .argument('<asset>', '素材路径')
+    .argument('<version>', '版本号'),
+).action(librarySynced(deleteCommand))
 
-program
-  .command('show')
-  .description('查看素材的全部版本、生成输入与文件路径')
-  .argument('<asset>', '素材路径')
-  .action(librarySynced(showCommand))
+projectOption(
+  program
+    .command('show')
+    .description('查看素材的全部版本、生成输入与文件路径')
+    .argument('<asset>', '素材路径'),
+).action(librarySynced(showCommand))
 
-program
-  .command('list')
-  .description('列出当前项目的素材')
-  .argument('[folder]', '只列某个文件夹')
-  .option('--kind <kind>', '按类型筛选：image / video / audio')
-  .action(librarySynced(listCommand))
+projectOption(
+  program
+    .command('list')
+    .description('列出当前项目的素材')
+    .argument('[folder]', '只列某个文件夹')
+    .option('--kind <kind>', '按类型筛选：image / video / audio'),
+).action(librarySynced(listCommand))
 
 await program.parseAsync()

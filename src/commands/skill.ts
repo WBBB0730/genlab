@@ -35,11 +35,24 @@ export async function installSkill(interactive: boolean) {
   }
 }
 
-/** 已安装时覆盖，即为更新。 */
 export async function skillAddCommand() {
   await installSkill(isInteractive())
 
   return { installed: SKILL_NAME }
+}
+
+/** 来源有变化时才更新，沿用安装时选的 agent。 */
+export async function skillUpdateCommand() {
+  try {
+    await runSkills(['update', SKILL_NAME], isInteractive())
+  } catch (error) {
+    throw new CliError(
+      `更新 skill 失败：可手动运行 npx skills update ${SKILL_NAME} -g`,
+      { cause: error },
+    )
+  }
+
+  return { updated: SKILL_NAME }
 }
 
 export async function skillRemoveCommand() {

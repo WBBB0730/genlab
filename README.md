@@ -21,19 +21,22 @@ genlab init
 可选：安装 skill，让 agent 需要生成媒体时自动想到 genlab（完整用法由 `genlab guide` 输出，不依赖 skill）。`genlab init` 时会询问，也可单独运行：
 
 ```bash
-genlab skill          # 安装；重复运行即更新（即 npx skills add WBBB0730/genlab -g -s genlab）
+genlab skill          # 安装（即 npx skills add WBBB0730/genlab -g -s genlab）
+genlab skill update   # 更新
 genlab skill remove   # 卸载
 ```
 
 ## 用法
 
 ```bash
+genlab project create pixel-quest                        # 新建项目
+genlab project link pixel-quest                          # 关联当前目录；不属于任何项目时用 default
 genlab models --kind image --search gpt-image
 genlab models gpt-image-2-5-sunburst-text-to-image      # 价格与参数表
-genlab create 角色/主角立绘 -m gpt-image-2-5-sunburst-text-to-image -p prompt="像素风骑士立绘" -n 4
-genlab edit 角色/主角立绘 2 -m gpt-image-2-5-sunburst-image-to-image -p prompt="盔甲改成蓝色" -p input_urls=@source
-genlab use 角色/主角立绘 3
-genlab create 片头/镜头 -m wan/3-0-video -p prompt="骑士转身拔剑" -p first_frame_url=@<库>/<项目>/角色/主角立绘/v3.png
+genlab create characters/hero -m gpt-image-2-5-sunburst-text-to-image -p prompt="像素风骑士立绘" -n 4
+genlab edit characters/hero 2 -m gpt-image-2-5-sunburst-image-to-image -p prompt="盔甲改成蓝色" -p input_urls=@source
+genlab use characters/hero 3
+genlab create intro/shot -m wan/3-0-video -p prompt="骑士转身拔剑" -p first_frame_url=@<库>/pixel-quest/characters/hero/v3.png
 genlab list
 ```
 
@@ -45,14 +48,13 @@ genlab list
 
 ```
 <GENLAB_LIBRARY>/
-  projects.json                 代码项目 → 项目的映射
   <项目>/<文件夹…>/<素材>/
     asset.json                  素材、生成、版本的完整记录
     v1.png  v2.png …            各版本产物
     references/<生成编号>/      参考输入副本
 ```
 
-项目由当前代码项目自动确定：有远程仓库时取仓库名，没有时用 `genlab project <名字>` 登记一次。
+代码项目用 `genlab project link <项目>` 关联到库里的项目，关联记在代码项目的 `.genlab/` 里（自带忽略文件，不会被提交），从当前目录向上查找；未关联时素材命令报错。`default` 是内置项目，放不属于任何代码项目的素材。
 
 ## 模型
 

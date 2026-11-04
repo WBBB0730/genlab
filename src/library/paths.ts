@@ -7,9 +7,6 @@ export const ASSET_FILE = 'asset.json'
 /** 素材文件夹里存放参考输入副本的子目录，按生成编号分开。 */
 export const REFERENCES_DIR = 'references'
 
-/** 库根目录下的项目映射表。 */
-export const PROJECT_MAP_FILE = 'projects.json'
-
 const MAX_NAME_BYTES = 255
 
 /** 项目、文件夹、素材名：非空，不以 . 开头，不含路径分隔符与控制字符。 */

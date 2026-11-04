@@ -1,10 +1,11 @@
-/** 库与元信息命令：models / project / import / use / delete / show / list。 */
+/** 库与元信息命令：models / import / use / delete / show / list。 */
 import path from 'node:path'
 
 import { CliError } from '../errors'
 import { syncAssets } from '../generation/sync'
 import { libraryRoot } from '../config'
 import { currentProject, locateAsset } from '../library/context'
+import type { ProjectOption } from '../library/context'
 import { deleteVersion, importAsset, setCurrentVersion } from '../library/ops'
 import { parseAssetPath, parseVersionArg } from '../library/paths'
 import { assetFile, readAsset } from '../library/record'
@@ -13,8 +14,6 @@ import { findModel, kindForModel, listModels } from '../catalog/catalog'
 import { describeInput, getInputSchema } from '../catalog/schema'
 import { MEDIA_KINDS } from '../library/media'
 import type { MediaKind } from '../library/media'
-import { identifyCodeProject } from '../project/identify'
-import { assignProject, updateProjectMap } from '../project/map'
 import { presentAsset, presentGenerations, presentVersion } from '../present'
 
 import { warn } from './output'
@@ -86,29 +85,12 @@ export async function modelsCommand(
   return models
 }
 
-export async function projectCommand(name: string | undefined) {
-  if (name) {
-    const root = libraryRoot()
-    const codeProject = await identifyCodeProject(process.cwd())
-
-    await updateProjectMap(root, (map) => ({
-      result: assignProject(map, codeProject, name),
-      changed: true,
-    }))
-  }
-
-  const project = await currentProject()
-
-  return {
-    project: project.name,
-    dir: project.dir,
-    remote: project.codeProject.remote,
-    codeProject: project.codeProject.path,
-  }
-}
-
-export async function importCommand(assetPath: string, file: string) {
-  const project = await currentProject()
+export async function importCommand(
+  assetPath: string,
+  file: string,
+  args: ProjectOption,
+) {
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
 
   await importAsset(project, location, file)
@@ -116,8 +98,12 @@ export async function importCommand(assetPath: string, file: string) {
   return presentAsset(project, location, await readAsset(location.dir))
 }
 
-export async function useCommand(assetPath: string, version: string) {
-  const project = await currentProject()
+export async function useCommand(
+  assetPath: string,
+  version: string,
+  args: ProjectOption,
+) {
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
 
   await setCurrentVersion(location, parseVersionArg(version))
@@ -125,8 +111,12 @@ export async function useCommand(assetPath: string, version: string) {
   return presentAsset(project, location, await readAsset(location.dir))
 }
 
-export async function deleteCommand(assetPath: string, version: string) {
-  const project = await currentProject()
+export async function deleteCommand(
+  assetPath: string,
+  version: string,
+  args: ProjectOption,
+) {
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
 
   await deleteVersion(location, parseVersionArg(version))
@@ -134,8 +124,8 @@ export async function deleteCommand(assetPath: string, version: string) {
   return presentAsset(project, location, await readAsset(location.dir))
 }
 
-export async function showCommand(assetPath: string) {
-  const project = await currentProject()
+export async function showCommand(assetPath: string, args: ProjectOption) {
+  const project = await currentProject(args.project)
   const location = locateAsset(project, assetPath)
   const record = await readAsset(location.dir)
 
@@ -148,10 +138,10 @@ export async function showCommand(assetPath: string) {
 
 export async function listCommand(
   folder: string | undefined,
-  args: { kind?: string },
+  args: { kind?: string } & ProjectOption,
 ) {
   const kind = parseKind(args.kind)
-  const project = await currentProject()
+  const project = await currentProject(args.project)
   const base = folder
     ? path.join(project.dir, ...parseAssetPath(folder))
     : project.dir

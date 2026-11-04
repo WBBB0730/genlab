@@ -18,7 +18,7 @@
 - 以 npm 包 `genlab` 发布，推荐 `npx -y genlab@latest <命令>` 使用，也可 `npm install -g genlab`。
 - 库的组织沿用 GenHub 内容重组之前、以**素材**为核心的模型：**项目** → 可嵌套的**文件夹** → **素材** → **版本**（见 ADR-0001）。
 - 库就是普通的文件夹：每个素材一个文件夹，里面是记录文件、各版本产物和**参考输入**副本，在 Finder 里看到的就是库本身（见 ADR-0002）。
-- **代码项目**通过**项目映射**自动对应到库里的**项目**，worktree、目录改名、重新 clone 都不影响（见 ADR-0004）。
+- **代码项目**通过**项目关联**对应到库里的**项目**：关联记在代码项目的 `.genlab/` 里，不随仓库提交；未关联时必须明确选择某个项目或内置的 `default`（见 ADR-0006）。
 - 可用模型与参数实时取自 kie 的模型目录与 schema，不写死（见 ADR-0005），覆盖 kie 上全部图片、视频、音频模型。下单、查结果、结果解析复用 GenHub 已验证的代码。
 - `genlab init` 一条命令写好配置。
 
@@ -40,10 +40,10 @@
 14. As an agent, I want 查看素材的全部版本、状态、生成输入与文件路径, so that 知道每个版本怎么来的、在哪里
 15. As an agent, I want 列出当前项目的素材并能按类型筛选, so that 先看看已有什么、沿用已有的文件夹分法
 16. As an agent, I want 按类型和关键词筛选模型目录, so that 快速找到合适的模型
-17. As an agent, I want 在任何代码项目及其 worktree 里调用时自动落到对应的项目, so that 不用每次说明项目名
-18. As a 用户, I want 没有远程仓库的代码项目第一次使用时登记一次项目名、之后一直沿用, so that 项目名稳定不变
-19. As a 用户, I want 代码项目中途建了远程仓库后仍对应原来的项目, so that 成品不会被拆到两处
-20. As a 用户, I want 改项目映射就能改项目名、或把多个代码项目归到同一个项目, so that 按自己的意思组织
+17. As an agent, I want 当前目录关联到一个项目后素材命令都落到这个项目, so that 不用每次说明项目名
+18. As an agent, I want 当前目录未关联时得到明确的报错与已有项目列表, so that 不会把素材放错项目
+19. As a 用户, I want 不属于任何代码项目时把素材放进内置的 default 项目, so that 在临时目录里也能随手生成
+20. As an agent, I want 用 `--project` 临时给另一个项目生成, so that 不必改动当前目录的关联
 21. As a 用户, I want 所有成品和记录集中存在配置指定的目录, so that 不会因为代码项目的清理、重新 clone 或 worktree 清理而丢失
 22. As a 用户, I want 在 Finder 里按 项目 / 文件夹 / 素材 浏览，并直接改名、移动、删除素材或文件夹, so that 不用为整理库另学命令
 23. As a 用户, I want 每个版本完整保存模型、输入参数、参考输入、来源以及与 kie 往来的原始数据, so that 任何时候都能追溯和复现
@@ -54,7 +54,7 @@
 
 ## Implementation Decisions
 
-- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genlab`（`npx genlab` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是随包发布的 `src/guide.md`，由 `genlab guide` 输出并附上由命令定义生成的命令参考，内容总与正在运行的版本一致；根帮助的描述指向它，`-h` 保持两层、只做命令参考。推荐用 `npx -y genlab@latest` 运行：每次都是最新版本，从根源避免版本落后，因此不做更新提醒；不带 `@latest` 时 npx 会复用已缓存的旧版本。仓库内的 skill（`skills/genlab`）只是发现入口，正文只指向 `npx -y genlab@latest guide`，可选安装：`genlab init` 时询问，或运行 `genlab skill`（重复运行即更新，`genlab skill remove` 卸载）；底层调用固定版本的 `npx -y skills@1.7.6 add|remove`（不把 skills 加为依赖），子进程用 nano-spawn 启动以兼容 Windows 的 `npx.cmd`。终端里由 skills 询问装到哪些 agent，非终端时加 `--yes` 装到检测到的全部 agent；skills 的输出写 stderr，stdout 只留给结果。使用说明不写进 skill，是因为 skill 与 CLI 分开安装，内容会落后于版本；agent-browser、lark-cli 同样由 CLI 自己输出使用说明。MCP 入口以后需要时在同一套核心上再包一层。
+- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genlab`（`npx genlab` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是随包发布的 `src/guide.md`，由 `genlab guide` 输出并附上由命令定义生成的命令参考，内容总与正在运行的版本一致；根帮助的描述指向它，`-h` 保持两层、只做命令参考。推荐用 `npx -y genlab@latest` 运行：每次都是最新版本，从根源避免版本落后，因此不做更新提醒；不带 `@latest` 时 npx 会复用已缓存的旧版本。仓库内的 skill（`skills/genlab`）只是发现入口，正文只指向 `npx -y genlab@latest guide`，可选安装：`genlab init` 时询问，或运行 `genlab skill`（`genlab skill update` 更新、沿用安装时选的 agent，`genlab skill remove` 卸载）；底层调用固定版本的 `npx -y skills@1.7.6 add|update|remove`（不把 skills 加为依赖），子进程用 nano-spawn 启动以兼容 Windows 的 `npx.cmd`。终端里由 skills 询问装到哪些 agent，非终端时加 `--yes` 装到检测到的全部 agent；skills 的输出写 stderr，stdout 只留给结果。使用说明不写进 skill，是因为 skill 与 CLI 分开安装，内容会落后于版本；agent-browser、lark-cli 同样由 CLI 自己输出使用说明。MCP 入口以后需要时在同一套核心上再包一层。
 - **复用 GenHub**：kie 的 `createTask` / `recordInfo` 封装、任务记录解析（kie 五态归约为生成中 / 就绪 / 失败三态）、版本规则。登录、项目权限、Supabase、webhook、Vercel 一概不要。
 - **模型**（见 ADR-0005）：不写死，`-m` 填 kie 的模型标识。
   - 模型目录取自 `GET /api/v1/models`，素材类型由目录的任务类型推出（Text/Image to Image、Image Editing → 图片；… to Video、Video Editing、Lip Sync、Speech to Video → 视频；Text to Speech、Text to Music、Audio to Audio → 音频）；对话模型不支持，任务类型互相矛盾或未知的模型报错。
@@ -70,7 +70,7 @@
 - **补收**：除 `guide`、`skill`、`models`、`project`、`wait` 外，任何命令运行前先把库里所有生成中的版本向 kie 查一遍，收下已完成的。kie 产物 14 天后失效，这期间都能补回。同一素材的写入互斥（锁文件 + 原子替换），多个进程同时收取同一任务只会落下一份。
 - **文件交付**：kie 访问不到本机文件，下单前通过 kie 的文件上传接口换成临时地址（24 小时有效、地址不带查询参数）。每次下单（含重试）都重新上传，不保存地址。
 - **配置**：`$XDG_CONFIG_HOME/genlab/.env`（默认 `~/.config/genlab/.env`）存 `KIE_API_KEY` 与库的根目录 `GENLAB_LIBRARY`（绝对路径，可用 `~` 开头），已存在的环境变量优先。不放在工具目录：经 npx 运行时包在临时缓存里。未配置直接报错，不回落到任何默认位置。`genlab init` 写入该文件：终端里交互询问 API Key（掩码输入，回车沿用已有）与库目录（默认 `~/GenLab`），也可用 `--key`、`--library` 直接给出；先用余额接口验证 Key，再建好库目录、以 600 权限写入配置，输出配置路径、库目录与余额。未给 `--skill` / `--no-skill` 时终端里还会询问是否安装 skill，非终端不安装；安装失败只警告，不影响已写入的配置，装上时输出带 `skill`。非终端且缺 Key 时报错。仓库另提供 `.env.example`。
-- **项目映射**（见 ADR-0004）：映射表 `projects.json` 放在库根目录。有远程仓库的代码项目按远程地址识别（https、scp、ssh 写法视为同一仓库），首次使用自动以远程仓库名登记，仓库名已被其他代码项目占用时报错要求指定；没有远程仓库的按主仓库所在位置识别（worktree 归到它的主仓库，不是 git 仓库的目录按目录位置），首次使用必须用 `project <名字>` 登记。查表时先按远程地址找，找不到再按位置找尚未记录远程地址的条目，找到就补上远程地址、名字不变。修改映射只改对应关系，不移动已有的素材文件夹。
+- **项目关联**（见 ADR-0006）：`project link <项目>` 在当前目录写入 `.genlab/project.json`（项目名），点目录自带只含 `*` 的 `.gitignore`；查找时从当前目录逐级向上取最近的关联，不判断是否为 git 仓库。未关联时素材命令报错，列出已有项目与关联命令。项目须先用 `project create` 建好；`default` 是内置项目，一直存在，首次放入素材时自动建好文件夹，不能再新建同名项目。素材命令都可用 `--project` 临时指定项目，不改动关联。
 - **目录结构**（见 ADR-0002）：`<库>/<项目>/<文件夹…>/<素材名>/`，素材文件夹里放记录文件 `asset.json`、各版本产物 `v<版本号>.<扩展名>`、`references/<生成编号>/` 下的参考输入副本（保留原文件名，同名加序号）。含记录文件的文件夹才是素材，素材里不能再建素材。素材名就是文件夹名，不另存。查询和补收直接扫描库目录，不建总索引。
 - **文件夹**：放在哪个文件夹由 agent 指定，可以按用途分也可以按类型分，工具不按类型自动分目录。`create`、`import` 时自动建好路径上缺的文件夹。使用说明要求 agent 先用 `list` 看已有的文件夹，尽量沿用。改名、移动、删除素材或文件夹在 Finder 里做，工具不提供对应命令。
 - **记录内容**：
@@ -87,9 +87,11 @@
   | ----------------------------------- | -------------------------------------------------- |
   | `guide`                             | 输出完整用法：概念、流程、参数写法、规则与全部命令 |
   | `init`                              | 写入配置（API Key 与库目录），可顺带安装 skill     |
-  | `skill [add \| remove]`             | 安装（重复运行即更新）或卸载 skill                 |
+  | `skill [add \| update \| remove]`   | 安装、更新或卸载 skill                             |
   | `models [模型] [--kind] [--search]` | 列出 kie 模型；指定模型时输出价格与参数表          |
-  | `project [名字]`                    | 查看当前代码项目对应的项目；带名字时登记或修改映射 |
+  | `project`                           | 查看当前目录关联的项目与库里的全部项目             |
+  | `project create <名字>`             | 新建项目                                           |
+  | `project link <名字>`               | 把当前目录关联到项目（不属于任何项目时用 default） |
   | `create <素材>`                     | 新建素材并发起第一次生成                           |
   | `generate <素材> [--from <版本>]`   | 在已有素材里发起生成；`--from` 即重新生成          |
   | `edit <素材> <版本>`                | 对某个就绪版本做 AI 编辑                           |
@@ -103,7 +105,7 @@
 
   生成类命令的选项：`-m/--model`、`-p/--param key=value | key:=JSON`（可重复）、`-n/--count`（并列任务数，1–10）、`--no-wait`、`--timeout <秒>`。
 
-- **寻址**：素材用「文件夹/素材名」指定，相对当前项目；版本写 `3` 或 `v3`。参数里引用的文件位于库内某个版本产物时自动识别并记录出处。
+- **寻址**：素材用「文件夹/素材名」指定（文件夹可省略），相对本次使用的项目（当前目录的项目关联，或 `--project` 指定）；版本写 `3` 或 `v3`。参数里引用的文件位于库内某个版本产物时自动识别并记录出处。
 - **输出**：见 DESIGN.md。结果是 JSON（终端里缩进，被程序读取时单行），空字段省略，路径一律绝对路径；警告与错误以 JSON 写到 stderr，出错退出码为 1。
 
 ## Testing Decisions
@@ -111,7 +113,7 @@
 - 只测外部行为，用 vitest 写单测（node 环境），沿用 GenHub 纯函数单测的形态；从 GenHub 搬来的任务记录解析单测一并搬入。
 - 覆盖：
   - 模型目录与参数：任务类型 → 素材类型、`-p` 解析（字符串、JSON、重复键成数组）、文件引用的收集与替换（`@source`、`@@`）、schema 取 input 并展开 `$ref`、校验时的类型转换与中文错误、参数表整理（含 oneOf 分支）。测试数据写成本地缓存，单测不访问网络。
-  - 项目映射：远程地址归一、自动登记、同一远程的多个副本、未登记报错、中途建远程、仓库名被占用。
+  - 项目关联：自带忽略文件、子目录向上查找、取最近的关联、关联文件不合法、未关联报错、`--project` 优先、项目不存在报错、`default` 无需事先建好。
   - 版本规则：当前版本的失败顺延、删除后的指针回退、叶子判定、版本号分配。
   - 生成全流程：在临时目录里跑真实文件系统，kie 网络层用替身——并列任务与收取、文件上传与模板改写、失败顺延、一个任务多个结果追加版本、产物类型不符、上传或下单全部失败不留素材、并列任务部分下单失败、重试下单失败版本保持失败、多个生成并发追加到同一素材、同名 / 嵌套 / 校验失败 / 未知模型 / 误用 `@source` 报错且不留文件、AI 编辑、重新生成、重试、删除与参考输入清理、导入与库内出处。
 - 单测不真实调用 kie。真实冒烟须经用户同意并控制花费（2026-11-03 用户授权 ¥10 以内，两轮合计约 171 积分 ≈ ¥6.2）。改为动态模型后已验证：模型目录与参数表、参数校验报错、GPT Image 2.5 Sunburst 文生图与 AI 编辑（`@source`）、Suno V6 Mini 音乐与音效（一个任务 2 个结果追加为 2 个版本）、Wan 3.0 首帧图生视频（`@文件` 与库内出处）、重新生成、`genlab init`（写入、沿用、Key 无效、缺 Key）。此前写死模型阶段另验证过 Wan 3.0 文生视频、Wan 2.7 视频编辑、MiniMax H3、Suno AI 编辑与项目映射。

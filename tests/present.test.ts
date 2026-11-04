@@ -38,7 +38,6 @@ const project: ProjectContext = {
   root: '/lib',
   name: 'p',
   dir: '/lib/p',
-  codeProject: { remote: null, path: '/code' },
 }
 
 const record: AssetRecord = {
