@@ -1,4 +1,4 @@
-/** genlab skill：经 skills（npx skills）全局安装或卸载本机 agent 的 genlab skill。 */
+/** genlab skill：经 skills（npx skills）全局安装或卸载本机 agent 的 GenLab skill。 */
 import spawn from 'nano-spawn'
 
 import { CliError } from '../errors'

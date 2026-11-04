@@ -363,7 +363,7 @@ describe('create + sync', () => {
     const failing = (step: 'upload' | 'createTask') => ({
       ...kie.submit,
       [step]: async () => {
-        throw new Error(`kie.ai 请求失败（402）：${step} 失败`)
+        throw new Error(`Kie.ai 请求失败（402）：${step} 失败`)
       },
     })
 
@@ -399,7 +399,7 @@ describe('create + sync', () => {
           calls += 1
 
           if (calls === 2) {
-            throw new Error('kie.ai 请求失败（429）：请求过于频繁')
+            throw new Error('Kie.ai 请求失败（429）：请求过于频繁')
           }
 
           return kie.submit.createTask(task)
@@ -409,7 +409,7 @@ describe('create + sync', () => {
 
     expect(submission).toEqual({
       versions: [1, 2],
-      errors: ['kie.ai 请求失败（429）：请求过于频繁'],
+      errors: ['Kie.ai 请求失败（429）：请求过于频繁'],
     })
 
     const record = await readAsset(location.dir)
@@ -617,7 +617,7 @@ describe('迭代', () => {
       retryVersion(location, 1, {
         ...kie.submit,
         createTask: async () => {
-          throw new Error('kie.ai 请求失败（500）：服务繁忙')
+          throw new Error('Kie.ai 请求失败（500）：服务繁忙')
         },
       }),
     ).rejects.toThrow('服务繁忙')

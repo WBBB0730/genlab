@@ -30,7 +30,7 @@ export async function createKieTask(task: KieTaskRequest): Promise<string> {
   )
 
   if (!body.data?.taskId) {
-    throw new CliError('kie.ai 未返回 taskId')
+    throw new CliError('Kie.ai 未返回 taskId')
   }
 
   return body.data.taskId
@@ -84,7 +84,7 @@ export async function getKieRecord(taskId: string): Promise<KieRecord> {
   )
 
   if (!body.data) {
-    throw new CliError('kie.ai 未返回任务记录')
+    throw new CliError('Kie.ai 未返回任务记录')
   }
 
   return body.data
@@ -107,7 +107,7 @@ export async function uploadKieFile(filePath: string): Promise<string> {
   )
 
   if (!body.data?.downloadUrl) {
-    throw new CliError('kie.ai 上传未返回地址')
+    throw new CliError('Kie.ai 上传未返回地址')
   }
 
   return body.data.downloadUrl
@@ -190,7 +190,7 @@ async function kieFetch<T>(
   try {
     body = (await response.json()) as typeof body
   } catch {
-    throw new CliError(`kie.ai 请求失败：HTTP ${response.status}`)
+    throw new CliError(`Kie.ai 请求失败：HTTP ${response.status}`)
   }
 
   // kie 的业务错误以 HTTP 200 + body.code 返回。
@@ -198,7 +198,7 @@ async function kieFetch<T>(
     const ErrorType = body.code === 429 ? KieRateLimitError : CliError
 
     throw new ErrorType(
-      `kie.ai 请求失败（${body.code ?? response.status}）：${body.msg || response.statusText}`,
+      `Kie.ai 请求失败（${body.code ?? response.status}）：${body.msg || response.statusText}`,
     )
   }
 

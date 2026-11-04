@@ -1,6 +1,6 @@
-/** kie.ai 任务记录的解析（纯函数，与网络层分离以便测试）。 */
+/** Kie.ai 任务记录的解析（纯函数，与网络层分离以便测试）。 */
 
-/** kie.ai recordInfo 响应的 data 部分，字段按需取用。 */
+/** Kie.ai recordInfo 响应的 data 部分，字段按需取用。 */
 export type KieRecord = {
   taskId: string
   state: 'waiting' | 'queuing' | 'generating' | 'success' | 'fail'
@@ -24,7 +24,7 @@ export type KieTaskResult = {
 }
 
 /**
- * 把 kie.ai 的五态任务记录归约成三态。结果在 resultJson 里：图片、视频、语音为
+ * 把 Kie.ai 的五态任务记录归约成三态。结果在 resultJson 里：图片、视频、语音为
  * `{ resultUrls: [...] }`；Suno（音乐、音效）为 `{ data: [{ audio_url, duration }, ...] }`。
  */
 export function parseKieRecord(record: KieRecord): KieTaskResult {

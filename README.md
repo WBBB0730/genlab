@@ -1,6 +1,6 @@
-# genlab
+# GenLab
 
-给本地 agent（Claude Code、Codex 等）用的 AI 媒体生成命令行工具。通过 [kie.ai](https://kie.ai) 生成图片、视频、音频（音乐、音效、语音），产物与完整生成记录保存在本机的库里。
+给本地 agent（Claude Code、Codex 等）用的 AI 媒体生成命令行工具。通过 [Kie.ai](https://kie.ai) 生成图片、视频、音频（音乐、音效、语音），产物与完整生成记录保存在本机的库里。
 
 ## 安装与配置
 
@@ -17,7 +17,7 @@ genlab init --key <KIE_API_KEY> --library ~/GenLab   # 或直接给出
 
 agent 使用前先运行 `genlab guide`：它输出完整用法（概念、流程、参数写法、命令参考），内容总与当前版本一致。
 
-可选安装 skill，让 agent 需要生成媒体时能发现 genlab。`genlab init` 时会询问，也可单独管理：
+可选安装 GenLab skill，`genlab init` 时会询问，也可单独管理：
 
 ```bash
 genlab skill          # 安装
@@ -67,7 +67,7 @@ genlab create intro/shot -m wan/3-0-video -p prompt="骑士转身拔剑" -p firs
 
 ## 模型
 
-模型清单与参数取自 kie 的模型目录，本地缓存一天，`genlab models --refresh` 强制刷新。支持 kie 上的图片、视频、音频生成模型，不支持对话模型。
+模型清单与参数取自 Kie.ai 的模型目录，本地缓存一天，`genlab models --refresh` 强制刷新。支持 Kie.ai 上的图片、视频、音频生成模型，不支持对话模型。
 
 ## 开发
 

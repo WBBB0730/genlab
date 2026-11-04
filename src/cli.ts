@@ -73,7 +73,7 @@ function withBackgroundSync<TArgs extends unknown[]>(
 // 帮助选项与 help 命令的文案由子命令继承，须在添加子命令前设置。
 const program = new Command('genlab')
   .description(
-    '用 kie.ai 的模型生成图片、视频、音频，产物与生成记录保存在本机的库里。完整用法：genlab guide',
+    '用 Kie.ai 的模型生成图片、视频、音频，产物与生成记录保存在本机的库里。完整用法：genlab guide',
   )
   .version(packageJson.version, '-V, --version', '显示版本号')
   .helpOption('-h, --help', '显示帮助')
@@ -116,8 +116,8 @@ program
 
 program
   .command('init')
-  .description('写入配置（kie.ai API Key 与库目录），可顺带安装 skill')
-  .option('--key <key>', 'kie.ai API Key')
+  .description('写入配置（Kie.ai API Key 与库目录），可顺带安装 skill')
+  .option('--key <key>', 'Kie.ai API Key')
   .option('--library <dir>', '库目录（绝对路径，可用 ~ 开头）')
   .option('--skill', '安装 skill，不再询问')
   .option('--no-skill', '不安装 skill')
@@ -125,7 +125,7 @@ program
 
 const skill = program
   .command('skill')
-  .description('安装、更新或卸载 genlab skill，让 agent 能发现 genlab')
+  .description('安装、更新或卸载 GenLab skill')
 
 skill
   .command('add', { isDefault: true })
@@ -144,7 +144,7 @@ skill
 
 program
   .command('models')
-  .description('列出 kie 模型；指定模型时输出价格与参数表')
+  .description('列出 Kie.ai 模型；指定模型时输出价格与参数表')
   .argument('[id]', '模型标识')
   .option('--kind <kind>', '按类型筛选：image / video / audio')
   .option('--search <text>', '按模型标识、供应商、名称筛选')

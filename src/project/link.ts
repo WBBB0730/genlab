@@ -12,7 +12,7 @@ import { CliError } from '../errors'
 export const LINK_DIR = '.genlab'
 
 const LINK_FILE = 'project.json'
-const GITIGNORE = '# genlab 自动创建\n*\n'
+const GITIGNORE = '# GenLab 自动创建\n*\n'
 
 export type ProjectLink = {
   project: string

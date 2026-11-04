@@ -44,60 +44,15 @@ function expandHome(dir: string): string {
     : dir
 }
 
-/**
- * 未通过选项给出的值：终端里交互询问（直接回车沿用已有配置），非终端时沿用已有配置，
- * 都没有就报错。未指定 --skill / --no-skill 时终端里询问是否安装 skill，非终端不安装；
- * 安装失败只警告，不影响已写入的配置。
- */
-export async function initCommand(args: {
-  key?: string
-  library?: string
-  skill?: boolean
-}) {
-  const file = configFile()
-  const existing = await readConfig(file)
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
-  let key = args.key ?? existing.KIE_API_KEY
-  let library = args.library ?? existing.GENLAB_LIBRARY
-  let skill = args.skill
-
-  if (interactive && !args.key) {
-    const input = answered(
-      await p.password({
-        message: existing.KIE_API_KEY
-          ? 'kie.ai API Key（回车沿用已有）'
-          : 'kie.ai API Key（https://kie.ai/api-key）',
-        validate: (value) =>
-          value || existing.KIE_API_KEY ? undefined : '不能为空',
-      }),
-    )
-
-    key = input || existing.KIE_API_KEY
-  }
-
-  if (interactive && !args.library) {
-    library = answered(
-      await p.text({
-        message: '库目录',
-        initialValue: existing.GENLAB_LIBRARY ?? DEFAULT_LIBRARY,
-        validate: (value) => (value ? undefined : '不能为空'),
-      }),
-    )
-  }
-
-  if (interactive && skill === undefined) {
-    skill = answered(
-      await p.confirm({
-        message: '安装 skill，让 agent 需要生成媒体时自动想到 genlab？',
-      }),
-    )
-  }
-
+/** 验证 Key 后建好库目录、写入配置，返回余额。 */
+async function writeConfig(
+  file: string,
+  key: string | undefined,
+  library: string,
+) {
   if (!key) {
     throw new CliError('缺少 --key')
   }
-
-  library ||= DEFAULT_LIBRARY
 
   if (!path.isAbsolute(expandHome(library))) {
     throw new CliError(`库目录必须是绝对路径：${library}`)
@@ -112,6 +67,80 @@ export async function initCommand(args: {
     `KIE_API_KEY=${JSON.stringify(key)}\nGENLAB_LIBRARY=${JSON.stringify(library)}\n`,
     { mode: 0o600 },
   )
+
+  return credits
+}
+
+/**
+ * 未通过选项给出的值：终端里交互询问（直接回车沿用已有配置），非终端时沿用已有配置，
+ * 都没有就报错。未指定 --skill / --no-skill 时终端里询问是否安装 skill，非终端不安装；
+ * 安装失败只警告，不影响已写入的配置。有询问时以 intro 开始，配置写入成败作为结尾。
+ */
+export async function initCommand(args: {
+  key?: string
+  library?: string
+  skill?: boolean
+}) {
+  const file = configFile()
+  const existing = await readConfig(file)
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
+  const asking =
+    interactive && (!args.key || !args.library || args.skill === undefined)
+  let key = args.key ?? existing.KIE_API_KEY
+  let library = args.library ?? existing.GENLAB_LIBRARY
+  let skill = args.skill
+
+  if (asking) {
+    p.intro('genlab init')
+  }
+
+  if (interactive && !args.key) {
+    const input = answered(
+      await p.password({
+        message: existing.KIE_API_KEY
+          ? '请输入 Kie.ai API Key（留空沿用已保存的 Key）：'
+          : '请输入 Kie.ai API Key（获取地址：https://kie.ai/api-key）：',
+        validate: (value) =>
+          value || existing.KIE_API_KEY ? undefined : '不能为空',
+      }),
+    )
+
+    key = input || existing.KIE_API_KEY
+  }
+
+  if (interactive && !args.library) {
+    library = answered(
+      await p.text({
+        message: '请输入库目录（存放所有项目与素材）：',
+        initialValue: existing.GENLAB_LIBRARY ?? DEFAULT_LIBRARY,
+        validate: (value) => (value ? undefined : '不能为空'),
+      }),
+    )
+  }
+
+  if (interactive && skill === undefined) {
+    skill = answered(
+      await p.confirm({ message: '是否为本机 agent 安装 GenLab skill？' }),
+    )
+  }
+
+  library ||= DEFAULT_LIBRARY
+
+  let credits: number
+
+  try {
+    credits = await writeConfig(file, key, library)
+  } catch (error) {
+    if (asking) {
+      p.cancel('配置未写入')
+    }
+
+    throw error
+  }
+
+  if (asking) {
+    p.outro('配置已写入')
+  }
 
   let installed = false
 

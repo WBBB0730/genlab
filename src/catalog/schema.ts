@@ -37,7 +37,7 @@ export async function getInputSchema(
       const openapi = await getKieModelSchema(model)
 
       if (!openapi) {
-        throw new CliError(`kie 尚未提供模型 ${model} 的参数定义`)
+        throw new CliError(`Kie.ai 尚未提供模型 ${model} 的参数定义`)
       }
 
       return openapi
