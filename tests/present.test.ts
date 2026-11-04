@@ -73,4 +73,25 @@ describe('presentAsset', () => {
       presentAsset(project, { path: 'a', dir: '/lib/p/a' }, record).versions,
     ).toHaveLength(4)
   })
+
+  it('版本带上所属生成的模型', () => {
+    const withGeneration: AssetRecord = {
+      ...record,
+      generations: [
+        {
+          id: 1,
+          model: 'suno/v6',
+          input: {},
+          references: [],
+          sourceVersion: null,
+          createdAt: '',
+        },
+      ],
+    }
+
+    expect(
+      presentAsset(project, { path: 'a', dir: '/lib/p/a' }, withGeneration)
+        .versions[0]?.model,
+    ).toBe('suno/v6')
+  })
 })

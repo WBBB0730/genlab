@@ -1,4 +1,4 @@
-/** genlab init：写入配置文件（API Key 与库目录），先验证 Key 可用。 */
+/** genlab init：写入配置文件（API Key 与库目录），先验证 Key 可用；可顺带安装 skill。 */
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -10,6 +10,9 @@ import writeFileAtomic from 'write-file-atomic'
 import { configFile } from '../config'
 import { CliError } from '../errors'
 import { getKieCredits } from '../kie/client'
+
+import { warn } from './output'
+import { installSkill } from './skill'
 
 const DEFAULT_LIBRARY = '~/GenLab'
 
@@ -26,13 +29,13 @@ async function readConfig(file: string): Promise<Record<string, string>> {
 }
 
 /** 交互输入被取消时退出。 */
-function answered(value: string | symbol): string {
+function answered<T>(value: T): Exclude<T, symbol> {
   if (p.isCancel(value)) {
     p.cancel('已取消')
     process.exit(1)
   }
 
-  return value as string
+  return value as Exclude<T, symbol>
 }
 
 function expandHome(dir: string): string {
@@ -43,14 +46,20 @@ function expandHome(dir: string): string {
 
 /**
  * 未通过选项给出的值：终端里交互询问（直接回车沿用已有配置），非终端时沿用已有配置，
- * 都没有就报错。
+ * 都没有就报错。未指定 --skill / --no-skill 时终端里询问是否安装 skill，非终端不安装；
+ * 安装失败只警告，不影响已写入的配置。
  */
-export async function initCommand(args: { key?: string; library?: string }) {
+export async function initCommand(args: {
+  key?: string
+  library?: string
+  skill?: boolean
+}) {
   const file = configFile()
   const existing = await readConfig(file)
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY)
   let key = args.key ?? existing.KIE_API_KEY
   let library = args.library ?? existing.GENLAB_LIBRARY
+  let skill = args.skill
 
   if (interactive && !args.key) {
     const input = answered(
@@ -76,6 +85,14 @@ export async function initCommand(args: { key?: string; library?: string }) {
     )
   }
 
+  if (interactive && skill === undefined) {
+    skill = answered(
+      await p.confirm({
+        message: '安装 skill，让 agent 需要生成媒体时自动想到 genlab？',
+      }),
+    )
+  }
+
   if (!key) {
     throw new CliError('缺少 --key')
   }
@@ -96,5 +113,21 @@ export async function initCommand(args: { key?: string; library?: string }) {
     { mode: 0o600 },
   )
 
-  return { config: file, library: expandHome(library), credits }
+  let installed = false
+
+  if (skill) {
+    try {
+      await installSkill(interactive)
+      installed = true
+    } catch (error) {
+      warn((error as Error).message)
+    }
+  }
+
+  return {
+    config: file,
+    library: expandHome(library),
+    credits,
+    skill: installed ? 'genlab' : undefined,
+  }
 }

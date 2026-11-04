@@ -12,10 +12,10 @@
 
 ## Solution
 
-做一个命令行工具 `genlab`，配一份给 agent 看的使用说明（skill）。agent 在代码项目里调用一条命令，工具就向 kie.ai 下单、自己轮询结果、把产物下载进本机的**库**，返回文件的完整路径，并留下完整的生成记录。支持图片、视频、音频三种素材类型，音频涵盖音乐、音效与语音。
+做一个命令行工具 `genlab`，给 agent 看的完整用法由 `genlab guide` 输出。agent 在代码项目里调用一条命令，工具就向 kie.ai 下单、自己轮询结果、把产物下载进本机的**库**，返回文件的完整路径，并留下完整的生成记录。支持图片、视频、音频三种素材类型，音频涵盖音乐、音效与语音。
 
 - **库**集中放在配置指定的目录里，不随代码项目的清理而丢失（见 ADR-0003）。
-- 以 npm 包 `genlab` 发布，`npm install -g genlab` 或 `npx genlab <命令>` 即可使用。
+- 以 npm 包 `genlab` 发布，推荐 `npx -y genlab@latest <命令>` 使用，也可 `npm install -g genlab`。
 - 库的组织沿用 GenHub 内容重组之前、以**素材**为核心的模型：**项目** → 可嵌套的**文件夹** → **素材** → **版本**（见 ADR-0001）。
 - 库就是普通的文件夹：每个素材一个文件夹，里面是记录文件、各版本产物和**参考输入**副本，在 Finder 里看到的就是库本身（见 ADR-0002）。
 - **代码项目**通过**项目映射**自动对应到库里的**项目**，worktree、目录改名、重新 clone 都不影响（见 ADR-0004）。
@@ -54,7 +54,7 @@
 
 ## Implementation Decisions
 
-- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genlab`（`npx genlab` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是仓库内的 skill（`skills/genlab`），不随 npm 包发布，用 `npx skills add WBBB0730/genlab -g -s genlab` 安装。MCP 入口以后需要时在同一套核心上再包一层。
+- **形态**：TypeScript 写的 Node 命令行工具，包名与命令名都是 `genlab`（`npx genlab` 按包名解析，二者一致才能直接调用）。工程沿用 npm-starter 模版：tsdown 打包成单个 `dist/cli.mjs`（运行依赖不打包），bumpp 发版，推送 `v*` tag 后由 GitHub Actions 经 Trusted Publishing 发布到 npm。保留 ESLint 与 Prettier，TypeScript 暂用 6（typescript-eslint 尚不支持 TS 7）。给 agent 的使用说明是随包发布的 `src/guide.md`，由 `genlab guide` 输出并附上由命令定义生成的命令参考，内容总与正在运行的版本一致；根帮助的描述指向它，`-h` 保持两层、只做命令参考。推荐用 `npx -y genlab@latest` 运行：每次都是最新版本，从根源避免版本落后，因此不做更新提醒；不带 `@latest` 时 npx 会复用已缓存的旧版本。仓库内的 skill（`skills/genlab`）只是发现入口，正文只指向 `npx -y genlab@latest guide`，可选安装：`genlab init` 时询问，或运行 `genlab skill`（重复运行即更新，`genlab skill remove` 卸载）；底层调用固定版本的 `npx -y skills@1.7.6 add|remove`（不把 skills 加为依赖），子进程用 nano-spawn 启动以兼容 Windows 的 `npx.cmd`。终端里由 skills 询问装到哪些 agent，非终端时加 `--yes` 装到检测到的全部 agent；skills 的输出写 stderr，stdout 只留给结果。使用说明不写进 skill，是因为 skill 与 CLI 分开安装，内容会落后于版本；agent-browser、lark-cli 同样由 CLI 自己输出使用说明。MCP 入口以后需要时在同一套核心上再包一层。
 - **复用 GenHub**：kie 的 `createTask` / `recordInfo` 封装、任务记录解析（kie 五态归约为生成中 / 就绪 / 失败三态）、版本规则。登录、项目权限、Supabase、webhook、Vercel 一概不要。
 - **模型**（见 ADR-0005）：不写死，`-m` 填 kie 的模型标识。
   - 模型目录取自 `GET /api/v1/models`，素材类型由目录的任务类型推出（Text/Image to Image、Image Editing → 图片；… to Video、Video Editing、Lip Sync、Speech to Video → 视频；Text to Speech、Text to Music、Audio to Audio → 音频）；对话模型不支持，任务类型互相矛盾或未知的模型报错。
@@ -62,13 +62,14 @@
   - 目录与 schema 缓存在 `$XDG_CACHE_HOME/genlab`（默认 `~/.cache/genlab`），一天有效，`models --refresh` 强制刷新；缓存里找不到模型时自动刷新一次目录。同一进程内目录类请求保持 1.1 秒间隔（kie 限 1 次/秒），被限流时等一个间隔重试一次。
   - `models` 列出目录（可按类型、关键词筛选）；`models <模型>` 输出价格说明与参数表（参数名、类型、可选值、默认值、范围、是否必填、说明；input 为 oneOf / anyOf 时列出各分支）。
   - 在已有素材上生成时，模型的素材类型必须与素材一致。
+  - 使用说明要求：用户没指定模型时，新素材第一次生成前请用户从 2–3 个候选中选，同一素材之后沿用不再询问；生成完汇报模型、积分与折合美元（kie 基础价 1 积分 = $0.005）。版本输出带所属生成的 `model`。
 - **参数**：`-p key=value` 为字符串，`-p key:=<JSON>` 为 JSON 值，同一个键重复即数组。按模型 schema 用 Ajv（JSON Schema 2020-12）校验，按 schema 把字符串转成数字、布尔，单值转数组；不校验 uri 等格式；错误信息用 ajv-i18n 中文化。不注入 schema 默认值，记录的就是实际发出的参数。
 - **文件引用**：参数值以 `@` 开头表示文件——`@<路径>` 为本机文件（相对调用时所在目录），`@source` 为 AI 编辑的源版本，`@@` 开头为字面量 `@`。本机文件复制进素材的 `references/<生成编号>/`，生成记录里的 input 模板改写为 `@references/<生成编号>/<文件名>`；每次下单（含重试）时上传并替换成临时地址。
 - **状态推进**：下单时不传回调地址，由工具自己向 `recordInfo` 轮询求证。先上传文件、向 kie 下单，拿到任务编号后才写进记录，每个被接受的任务建一个版本，因此记录里生成中的版本都带任务编号；任务返回多个结果（如 Suno 一次 2 首）时，多出来的结果追加为同一次生成的新版本，排在该生成末尾；积分记在结果序号 0 的版本上。产物先下载到素材文件夹的临时文件，加锁确认版本仍在等待该任务后再就位，重复收取不会出错。产物的媒体类型与素材类型不符时标失败。
 - **等待**：`create`、`generate`、`edit`、`retry` 提交后默认轮询到全部新版本终态才返回，默认最多等 90 秒（agent 执行命令一般 2 分钟超时），可用 `--timeout` 调整，用 `--no-wait` 提交后立即返回。没完成就返回当前状态（`pending: true`），用 `wait` 接着等；`wait` 不指定素材时等待当前项目里全部生成中的版本。
-- **补收**：除 `models`、`project`、`wait` 外，任何命令运行前先把库里所有生成中的版本向 kie 查一遍，收下已完成的。kie 产物 14 天后失效，这期间都能补回。同一素材的写入互斥（锁文件 + 原子替换），多个进程同时收取同一任务只会落下一份。
+- **补收**：除 `guide`、`skill`、`models`、`project`、`wait` 外，任何命令运行前先把库里所有生成中的版本向 kie 查一遍，收下已完成的。kie 产物 14 天后失效，这期间都能补回。同一素材的写入互斥（锁文件 + 原子替换），多个进程同时收取同一任务只会落下一份。
 - **文件交付**：kie 访问不到本机文件，下单前通过 kie 的文件上传接口换成临时地址（24 小时有效、地址不带查询参数）。每次下单（含重试）都重新上传，不保存地址。
-- **配置**：`$XDG_CONFIG_HOME/genlab/.env`（默认 `~/.config/genlab/.env`）存 `KIE_API_KEY` 与库的根目录 `GENLAB_LIBRARY`（绝对路径，可用 `~` 开头），已存在的环境变量优先。不放在工具目录：经 npx 运行时包在临时缓存里。未配置直接报错，不回落到任何默认位置。`genlab init` 写入该文件：终端里交互询问 API Key（掩码输入，回车沿用已有）与库目录（默认 `~/GenLab`），也可用 `--key`、`--library` 直接给出；先用余额接口验证 Key，再建好库目录、以 600 权限写入配置，输出配置路径、库目录与余额。非终端且缺 Key 时报错。仓库另提供 `.env.example`。
+- **配置**：`$XDG_CONFIG_HOME/genlab/.env`（默认 `~/.config/genlab/.env`）存 `KIE_API_KEY` 与库的根目录 `GENLAB_LIBRARY`（绝对路径，可用 `~` 开头），已存在的环境变量优先。不放在工具目录：经 npx 运行时包在临时缓存里。未配置直接报错，不回落到任何默认位置。`genlab init` 写入该文件：终端里交互询问 API Key（掩码输入，回车沿用已有）与库目录（默认 `~/GenLab`），也可用 `--key`、`--library` 直接给出；先用余额接口验证 Key，再建好库目录、以 600 权限写入配置，输出配置路径、库目录与余额。未给 `--skill` / `--no-skill` 时终端里还会询问是否安装 skill，非终端不安装；安装失败只警告，不影响已写入的配置，装上时输出带 `skill`。非终端且缺 Key 时报错。仓库另提供 `.env.example`。
 - **项目映射**（见 ADR-0004）：映射表 `projects.json` 放在库根目录。有远程仓库的代码项目按远程地址识别（https、scp、ssh 写法视为同一仓库），首次使用自动以远程仓库名登记，仓库名已被其他代码项目占用时报错要求指定；没有远程仓库的按主仓库所在位置识别（worktree 归到它的主仓库，不是 git 仓库的目录按目录位置），首次使用必须用 `project <名字>` 登记。查表时先按远程地址找，找不到再按位置找尚未记录远程地址的条目，找到就补上远程地址、名字不变。修改映射只改对应关系，不移动已有的素材文件夹。
 - **目录结构**（见 ADR-0002）：`<库>/<项目>/<文件夹…>/<素材名>/`，素材文件夹里放记录文件 `asset.json`、各版本产物 `v<版本号>.<扩展名>`、`references/<生成编号>/` 下的参考输入副本（保留原文件名，同名加序号）。含记录文件的文件夹才是素材，素材里不能再建素材。素材名就是文件夹名，不另存。查询和补收直接扫描库目录，不建总索引。
 - **文件夹**：放在哪个文件夹由 agent 指定，可以按用途分也可以按类型分，工具不按类型自动分目录。`create`、`import` 时自动建好路径上缺的文件夹。使用说明要求 agent 先用 `list` 看已有的文件夹，尽量沿用。改名、移动、删除素材或文件夹在 Finder 里做，工具不提供对应命令。
@@ -84,7 +85,9 @@
 
   | 命令                                | 作用                                               |
   | ----------------------------------- | -------------------------------------------------- |
-  | `init`                              | 写入配置（API Key 与库目录）                       |
+  | `guide`                             | 输出完整用法：概念、流程、参数写法、规则与全部命令 |
+  | `init`                              | 写入配置（API Key 与库目录），可顺带安装 skill     |
+  | `skill [add \| remove]`             | 安装（重复运行即更新）或卸载 skill                 |
   | `models [模型] [--kind] [--search]` | 列出 kie 模型；指定模型时输出价格与参数表          |
   | `project [名字]`                    | 查看当前代码项目对应的项目；带名字时登记或修改映射 |
   | `create <素材>`                     | 新建素材并发起第一次生成                           |

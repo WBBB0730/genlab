@@ -4,10 +4,11 @@
 
 ## 安装
 
-需要 Node.js 22.19 及以上。
+需要 Node.js 22.19 及以上。推荐直接用 npx 运行，每次都是最新版本；下文的 `genlab` 均可写作 `npx -y genlab@latest`。
 
 ```bash
-npm install -g genlab   # 或直接 npx genlab <命令>
+npx -y genlab@latest <命令>
+npm install -g genlab   # 也可全局安装，需自行更新
 ```
 
 初始化配置（API Key 与库目录，写入 `~/.config/genlab/.env`，同名环境变量优先）：
@@ -17,10 +18,11 @@ genlab init
 # 或：genlab init --key <KIE_API_KEY> --library ~/GenLab
 ```
 
-给 agent 安装使用说明（skill）：
+可选：安装 skill，让 agent 需要生成媒体时自动想到 genlab（完整用法由 `genlab guide` 输出，不依赖 skill）。`genlab init` 时会询问，也可单独运行：
 
 ```bash
-npx skills add WBBB0730/genlab -g -s genlab
+genlab skill          # 安装；重复运行即更新（即 npx skills add WBBB0730/genlab -g -s genlab）
+genlab skill remove   # 卸载
 ```
 
 ## 用法
@@ -37,7 +39,7 @@ genlab list
 
 参数用 `-p key=value`（`key:=JSON` 传 JSON 值，同键重复即数组）；值写 `@<路径>` 上传本机文件，`@source` 引用 AI 编辑的源版本。
 
-完整命令见 `genlab --help` 与 [skills/genlab/SKILL.md](skills/genlab/SKILL.md)。
+完整用法见 `genlab guide`。
 
 ## 库
 

@@ -175,7 +175,7 @@ export async function listCommand(
       generating: record.versions.filter((v) => v.state === 'generating')
         .length,
       failed: record.versions.filter((v) => v.state === 'failed').length,
-      current: current ? presentVersion(dir, current) : null,
+      current: current ? presentVersion(dir, record, current) : null,
     })
   }
 

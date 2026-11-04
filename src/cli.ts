@@ -10,6 +10,7 @@ import {
   retryCommand,
   waitCommand,
 } from './commands/generation'
+import { guideCommand } from './commands/guide'
 import {
   deleteCommand,
   importCommand,
@@ -22,9 +23,13 @@ import {
 } from './commands/library'
 import { initCommand } from './commands/init'
 import { action } from './commands/output'
+import { skillAddCommand, skillRemoveCommand } from './commands/skill'
 
 /** 单次命令默认最多等待的秒数：agent 执行命令通常 2 分钟超时。 */
 const DEFAULT_TIMEOUT_SECONDS = 90
+
+/** 使用说明与入口同目录：打包时由 tsdown 复制到 dist。 */
+const GUIDE_FILE = new URL('./guide.md', import.meta.url)
 
 function positiveInteger(value: string): number {
   const parsed = Number(value)
@@ -52,7 +57,9 @@ function librarySynced<TArgs extends unknown[]>(
 }
 
 const program = new Command('genlab')
-  .description('AI 媒体生成（kie.ai），产物与生成记录保存在本机的库里')
+  .description(
+    'AI 媒体生成（kie.ai），产物与生成记录保存在本机的库里。使用前先运行 genlab guide 查看完整用法',
+  )
   .version(packageJson.version)
   .showHelpAfterError()
 
@@ -83,11 +90,32 @@ function waitOptions(command: Command) {
 }
 
 program
+  .command('guide')
+  .description('输出完整用法：概念、流程、参数写法、规则与全部命令')
+  .action(() => guideCommand(program, GUIDE_FILE))
+
+program
   .command('init')
-  .description('写入配置（kie.ai API Key 与库目录）')
+  .description('写入配置（kie.ai API Key 与库目录），可顺带安装 skill')
   .option('--key <key>', 'kie.ai API Key')
   .option('--library <dir>', '库目录')
+  .option('--skill', '安装 skill，不再询问')
+  .option('--no-skill', '不安装 skill')
   .action(action(initCommand))
+
+const skill = program
+  .command('skill')
+  .description('管理 skill：让 agent 需要生成媒体时自动想到 genlab')
+
+skill
+  .command('add', { isDefault: true })
+  .description('安装 skill；已安装时覆盖，即为更新（默认）')
+  .action(action(skillAddCommand))
+
+skill
+  .command('remove')
+  .description('卸载 skill')
+  .action(action(skillRemoveCommand))
 
 program
   .command('models')

@@ -2,6 +2,7 @@
 import path from 'node:path'
 
 import type { AssetLocation, ProjectContext } from './library/context'
+import { findGeneration } from './library/record'
 import type { AssetRecord, VersionRecord } from './library/record'
 
 type Json = Record<string, unknown>
@@ -13,10 +14,15 @@ function compact<T extends Json>(object: T): Partial<T> {
   ) as Partial<T>
 }
 
-export function presentVersion(dir: string, version: VersionRecord) {
+export function presentVersion(
+  dir: string,
+  record: AssetRecord,
+  version: VersionRecord,
+) {
   return compact({
     version: version.number,
     state: version.state,
+    model: findGeneration(record, version.generation)?.model,
     file: version.file ? path.join(dir, version.file) : null,
     mimeType: version.mimeType,
     width: version.width,
@@ -74,7 +80,9 @@ export function presentAsset(
     kind: record.kind,
     current: record.currentVersion,
     pending: listed.some((version) => version.state === 'generating'),
-    versions: listed.map((version) => presentVersion(location.dir, version)),
+    versions: listed.map((version) =>
+      presentVersion(location.dir, record, version),
+    ),
   }
 }
 
