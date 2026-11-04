@@ -13,10 +13,15 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import lockfile from 'proper-lockfile'
 
-import { downloadFile, getKieRecord } from '../kie/client'
+import {
+  DownloadRejectedError,
+  downloadFile,
+  getKieRecord,
+} from '../kie/client'
 import { parseKieRecord } from '../kie/record'
 import type { KieRecord, KieResultItem } from '../kie/record'
-import { inspectMedia } from '../library/media'
+import { UnsupportedMediaError, inspectMedia } from '../library/media'
+import type { MediaInfo } from '../library/media'
 import { versionFileName } from '../library/paths'
 import { now, readAsset, updateAsset } from '../library/record'
 import { allocateVersion } from '../library/rules'
@@ -250,7 +255,8 @@ async function syncTask(
   }
 
   // 先把全部产物下载到临时文件，锁内再按结果序号落定：已有版本壳的就位，多出来的结果
-  // 追加为同一次生成的新版本，缺结果的版本壳标失败。
+  // 追加为同一次生成的新版本，缺结果的版本壳标失败。先给每个结果对上版本再逐个落定，
+  // 前面的结果失败时当前版本才能顺延到后面的结果。
   const downloads = await Promise.all(
     result.results.map((item, index) =>
       downloadProduct(dir, record, taskId, index, item, deps),
@@ -262,13 +268,16 @@ async function syncTask(
       stillWaiting(latest, member.number, taskId),
     )
     const lead = waiting[0]
+    const targets = downloads.map(
+      (_, index) =>
+        latest.versions.find(
+          (version) =>
+            version.taskId === taskId && version.resultIndex === index,
+        ) ?? (lead ? appendResultVersion(latest, lead, index) : null),
+    )
 
     for (const [index, product] of downloads.entries()) {
-      const existing = latest.versions.find(
-        (version) => version.taskId === taskId && version.resultIndex === index,
-      )
-      const target =
-        existing ?? (lead ? appendResultVersion(latest, lead, index) : null)
+      const target = targets[index]
 
       if (!target || target.state !== 'generating') {
         if (!('error' in product)) {
@@ -326,7 +335,10 @@ function appendResultVersion(
   return version
 }
 
-/** 下载并识别产物；类型与素材不符时返回错误（按失败处理），网络错误直接抛出（下次再收）。 */
+/**
+ * 下载并识别产物。拿不到的产物（下载被拒绝、识别不出类型或与素材类型不符）返回错误，
+ * 按失败处理；其余错误（如网络）直接抛出，下一轮再收。
+ */
 async function downloadProduct(
   dir: string,
   record: AssetRecord,
@@ -338,8 +350,24 @@ async function downloadProduct(
   | { temp: string; extension: string; info: Omit<ProductInfo, 'file'> }
   | { error: string }
 > {
-  const { bytes, contentType } = await deps.download(item.url)
-  const media = await inspectMedia(bytes, contentType)
+  let bytes: Uint8Array
+  let media: MediaInfo
+
+  try {
+    const file = await deps.download(item.url)
+
+    bytes = file.bytes
+    media = await inspectMedia(bytes, file.contentType)
+  } catch (error) {
+    if (
+      error instanceof DownloadRejectedError ||
+      error instanceof UnsupportedMediaError
+    ) {
+      return { error: error.message }
+    }
+
+    throw error
+  }
 
   if (media.kind !== record.kind) {
     return {

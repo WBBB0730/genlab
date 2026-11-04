@@ -113,6 +113,9 @@ export async function uploadKieFile(filePath: string): Promise<string> {
   return body.data.downloadUrl
 }
 
+/** 下载被拒绝（4xx，超时与限流除外）：链接已失效或无权访问，再试也拿不到。 */
+export class DownloadRejectedError extends CliError {}
+
 /** 下载产物原文件。 */
 export async function downloadFile(
   url: string,
@@ -122,7 +125,13 @@ export async function downloadFile(
   })
 
   if (!response.ok) {
-    throw new CliError(`下载产物失败：HTTP ${response.status}`)
+    const { status } = response
+    const ErrorType =
+      status >= 400 && status < 500 && status !== 408 && status !== 429
+        ? DownloadRejectedError
+        : CliError
+
+    throw new ErrorType(`下载产物失败：HTTP ${status}`)
   }
 
   return {

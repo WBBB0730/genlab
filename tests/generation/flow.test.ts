@@ -19,6 +19,7 @@ import {
   waitForVersions,
 } from '../../src/generation/sync'
 import type { SyncDeps } from '../../src/generation/sync'
+import { DownloadRejectedError } from '../../src/kie/client'
 import type * as KieClient from '../../src/kie/client'
 import type { KieTaskRequest } from '../../src/kie/client'
 import type { KieRecord } from '../../src/kie/record'
@@ -71,6 +72,7 @@ function fakeKie() {
   const tasks: KieTaskRequest[] = []
   const records = new Map<string, Omit<KieRecord, 'taskId'>>()
   const files = new Map<string, Buffer>()
+  const downloadErrors = new Map<string, Error>()
   const submit: SubmitDeps = {
     upload: async (file) => {
       uploads.push(file)
@@ -88,13 +90,18 @@ function fakeKie() {
       taskId,
       ...(records.get(taskId) ?? { state: 'generating' }),
     }),
-    download: async (url) => ({
-      bytes: files.get(url) ?? PNG,
-      contentType: null,
-    }),
+    download: async (url) => {
+      const error = downloadErrors.get(url)
+
+      if (error) {
+        throw error
+      }
+
+      return { bytes: files.get(url) ?? PNG, contentType: null }
+    },
   }
 
-  return { uploads, tasks, records, files, submit, sync }
+  return { uploads, tasks, records, files, downloadErrors, submit, sync }
 }
 
 function success(urls: string[], credits = 3): Omit<KieRecord, 'taskId'> {
@@ -278,6 +285,75 @@ describe('create + sync', () => {
     expect((await readAsset(location.dir)).versions[0]).toMatchObject({
       state: 'failed',
       failReason: '产物类型（image）与素材类型（video）不符',
+    })
+  })
+
+  it('一个任务多个结果：前面的结果失败时，当前版本顺延到后面的结果', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'm')
+
+    kie.files.set('https://r/2.wav', wav())
+    await createAsset(
+      project,
+      location,
+      { model: 'test/music', params: ['prompt=p'] },
+      kie.submit,
+    )
+    kie.records.set('task-1', {
+      state: 'success',
+      resultJson: JSON.stringify({
+        data: [
+          { audio_url: 'https://r/1.png' },
+          { audio_url: 'https://r/2.wav' },
+        ],
+      }),
+    })
+    await syncAssets([location.dir], kie.sync)
+
+    const record = await readAsset(location.dir)
+
+    expect(record.currentVersion).toBe(2)
+    expect(record.versions).toMatchObject([
+      { number: 1, state: 'failed' },
+      { number: 2, state: 'ready' },
+    ])
+  })
+
+  it('下载被拒绝或识别不出类型时按失败处理，网络错误留到下一轮再收', async () => {
+    const kie = fakeKie()
+    const location = locateAsset(project, 'a')
+
+    await createAsset(
+      project,
+      location,
+      { model: 'test/image', params: ['prompt=p'], count: 3 },
+      kie.submit,
+    )
+    kie.downloadErrors.set(
+      'https://r/1.png',
+      new DownloadRejectedError('下载产物失败：HTTP 404'),
+    )
+    kie.files.set('https://r/2.png', Buffer.from('not media'))
+    kie.downloadErrors.set('https://r/3.png', new TypeError('fetch failed'))
+
+    for (const task of [1, 2, 3]) {
+      kie.records.set(`task-${task}`, success([`https://r/${task}.png`]))
+    }
+
+    await syncAssets([location.dir], kie.sync)
+
+    expect((await readAsset(location.dir)).versions).toMatchObject([
+      { number: 1, state: 'failed', failReason: '下载产物失败：HTTP 404' },
+      { number: 2, state: 'failed', failReason: '无法识别的媒体类型：未知' },
+      { number: 3, state: 'generating' },
+    ])
+
+    kie.downloadErrors.delete('https://r/3.png')
+    await syncAssets([location.dir], kie.sync)
+
+    expect((await readAsset(location.dir)).versions[2]).toMatchObject({
+      state: 'ready',
+      file: 'v3.png',
     })
   })
 

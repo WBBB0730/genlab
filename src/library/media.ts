@@ -18,6 +18,9 @@ export type MediaInfo = {
   duration: number | null
 }
 
+/** 识别不出的媒体类型。 */
+export class UnsupportedMediaError extends CliError {}
+
 /** 按内容识别不出时，按下载响应的 Content-Type 兜住常见格式。 */
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -52,7 +55,7 @@ export async function inspectMedia(
   const kind = kindForMime(mimeType)
 
   if (!extension || !kind) {
-    throw new CliError(`无法识别的媒体类型：${mimeType || '未知'}`)
+    throw new UnsupportedMediaError(`无法识别的媒体类型：${mimeType || '未知'}`)
   }
 
   return {
