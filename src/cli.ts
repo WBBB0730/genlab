@@ -144,7 +144,7 @@ skill
 
 program
   .command('models')
-  .description('列出 Kie.ai 模型；指定模型时输出价格与参数表')
+  .description('列出 Kie.ai 模型（从新到旧）；指定模型时输出价格与参数表')
   .argument('[id]', '模型标识')
   .option('--kind <kind>', '按类型筛选：image / video / audio')
   .option('--search <text>', '按模型标识、供应商、名称筛选')

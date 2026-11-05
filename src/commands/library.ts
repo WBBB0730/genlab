@@ -22,7 +22,7 @@ function parseKind(kind: string | undefined): MediaKind | undefined {
   return kind as MediaKind | undefined
 }
 
-/** 模型列表（来自 kie 模型目录），或单个模型的价格与参数表。 */
+/** 模型列表（来自 kie 模型目录，从新到旧），或单个模型的价格与参数表。 */
 export async function modelsCommand(
   id: string | undefined,
   args: { kind?: string; search?: string; refresh?: boolean },
@@ -44,7 +44,8 @@ export async function modelsCommand(
   const search = args.search?.toLowerCase()
   const models = []
 
-  for (const model of await listModels(args.refresh)) {
+  // kie 目录按上架时间从旧到新排列，反过来让新模型排在前面。
+  for (const model of (await listModels(args.refresh)).toReversed()) {
     let modelKind: MediaKind | null
 
     try {
