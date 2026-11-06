@@ -29,9 +29,9 @@ export function presentVersion(
     height: version.height,
     duration: version.duration,
     fileSize: version.fileSize,
-    credits: version.credits,
     failReason: version.failReason,
     generation: version.generation,
+    taskId: version.taskId,
     sourceVersion: version.sourceVersion,
     importedFrom: version.importedFrom,
   })
@@ -59,8 +59,8 @@ function withTaskSiblings(record: AssetRecord, versions: number[]): number[] {
 }
 
 /**
- * versions 指定时只列这些版本（连同同一任务追加出的版本）；pending 表示其中仍有生成中
- * 的版本。
+ * versions 指定时只列这些版本（连同同一任务追加出的版本）与它们所属的任务，否则列出全部
+ * 版本与全部任务（含重试前的任务）；pending 表示列出的版本里仍有生成中的版本。
  */
 export function presentAsset(
   project: ProjectContext,
@@ -72,6 +72,7 @@ export function presentAsset(
   const listed = record.versions.filter(
     (version) => !wanted || wanted.includes(version.number),
   )
+  const taskIds = new Set(listed.map((version) => version.taskId))
 
   return {
     project: project.name,
@@ -83,6 +84,16 @@ export function presentAsset(
     versions: listed.map((version) =>
       presentVersion(location.dir, record, version),
     ),
+    tasks: record.generations
+      .flatMap((generation) => generation.tasks)
+      .filter((task) => !wanted || taskIds.has(task.id))
+      .map((task) =>
+        compact({
+          taskId: task.id,
+          credits: task.credits,
+          elapsed: task.elapsed,
+        }),
+      ),
   }
 }
 

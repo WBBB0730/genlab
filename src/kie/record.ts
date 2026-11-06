@@ -7,6 +7,8 @@ export type KieRecord = {
   resultJson?: string | null
   failMsg?: string | null
   creditsConsumed?: number | null
+  /** 从接单到出结果的耗时（秒）。 */
+  costTime?: number | null
 }
 
 /** 任务结果数组的一项：产物 URL 与可选时长（秒，kie 提供时才有）。 */
@@ -20,7 +22,21 @@ export type KieTaskResult = {
   /** 成功时的产物列表，按生成顺序排列（多数模型一项，Suno 多项）。 */
   results: KieResultItem[]
   failReason: string | null
+}
+
+/** 任务的消耗：kie 扣除的积分与耗时（秒），kie 没给出时为 null。 */
+export type KieUsage = {
   credits: number | null
+  elapsed: number | null
+}
+
+export function kieUsage(
+  record: Pick<KieRecord, 'creditsConsumed' | 'costTime'>,
+): KieUsage {
+  return {
+    credits: record.creditsConsumed ?? null,
+    elapsed: record.costTime ?? null,
+  }
 }
 
 /**
@@ -28,33 +44,25 @@ export type KieTaskResult = {
  * `{ resultUrls: [...] }`；Suno（音乐、音效）为 `{ data: [{ audio_url, duration }, ...] }`。
  */
 export function parseKieRecord(record: KieRecord): KieTaskResult {
-  const credits = record.creditsConsumed ?? null
-
   if (record.state === 'fail') {
     return {
       state: 'failed',
       results: [],
       failReason: record.failMsg || '生成失败',
-      credits,
     }
   }
 
   if (record.state !== 'success') {
-    return { state: 'pending', results: [], failReason: null, credits }
+    return { state: 'pending', results: [], failReason: null }
   }
 
   const results = parseResults(record.resultJson)
 
   if (results.length === 0) {
-    return {
-      state: 'failed',
-      results: [],
-      failReason: '生成结果为空',
-      credits,
-    }
+    return { state: 'failed', results: [], failReason: '生成结果为空' }
   }
 
-  return { state: 'succeeded', results, failReason: null, credits }
+  return { state: 'succeeded', results, failReason: null }
 }
 
 /** resultJson → 产物列表；格式异常或为空返回空数组（由调用方按失败处理，避免卡在 pending）。 */

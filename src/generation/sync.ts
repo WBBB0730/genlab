@@ -28,7 +28,7 @@ import { allocateVersion } from '../library/rules'
 import type { AssetRecord, VersionRecord } from '../library/record'
 import { findAssetDirs } from '../library/scan'
 
-import { failVersion, fulfillVersion } from './state'
+import { failVersion, fulfillVersion, settleTask } from './state'
 import type { ProductInfo } from './state'
 
 export type SyncDeps = {
@@ -235,18 +235,14 @@ async function syncTask(
   const members = record.versions.filter(
     (version) => version.state === 'generating' && version.taskId === taskId,
   )
-  const task = { credits: result.credits, kieRecord }
 
   if (result.state === 'failed') {
     await updateAsset(dir, (latest) => {
+      settleTask(latest, taskId, kieRecord)
+
       for (const member of members) {
         if (stillWaiting(latest, member.number, taskId)) {
-          failVersion(
-            latest,
-            member.number,
-            result.failReason ?? '生成失败',
-            task,
-          )
+          failVersion(latest, member.number, result.failReason ?? '生成失败')
         }
       }
     })
@@ -264,6 +260,8 @@ async function syncTask(
   )
 
   await updateAsset(dir, async (latest) => {
+    settleTask(latest, taskId, kieRecord)
+
     const waiting = members.filter((member) =>
       stillWaiting(latest, member.number, taskId),
     )
@@ -288,18 +286,18 @@ async function syncTask(
       }
 
       if ('error' in product) {
-        failVersion(latest, target.number, product.error, task)
+        failVersion(latest, target.number, product.error)
       } else {
         const file = versionFileName(target.number, product.extension)
 
         await rename(product.temp, path.join(dir, file))
-        fulfillVersion(latest, target.number, { ...product.info, file }, task)
+        fulfillVersion(latest, target.number, { ...product.info, file })
       }
     }
 
     for (const member of waiting) {
       if (stillWaiting(latest, member.number, taskId)) {
-        failVersion(latest, member.number, '生成结果为空', task)
+        failVersion(latest, member.number, '生成结果为空')
       }
     }
   })

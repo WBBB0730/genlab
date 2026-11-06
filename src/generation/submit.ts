@@ -39,7 +39,11 @@ import {
   readAsset,
   updateAsset,
 } from '../library/record'
-import type { AssetRecord, ReferenceRecord } from '../library/record'
+import type {
+  AssetRecord,
+  ReferenceRecord,
+  TaskRecord,
+} from '../library/record'
 import { allocateVersion, nextGenerationId } from '../library/rules'
 import { findOwningAsset } from '../library/scan'
 
@@ -105,7 +109,7 @@ export async function createAsset(
       deps,
     )
     const record: AssetRecord = {
-      schema: 2,
+      schema: 3,
       id: randomUUID(),
       kind: plan.model.kind,
       currentVersion: 0,
@@ -224,16 +228,20 @@ export async function retryVersion(
     deps,
   )
 
+  // 新任务追加进所属生成，重试前的任务连同它的积分与耗时保留。
   await updateAsset(location.dir, (latest) => {
-    Object.assign(findVersion(latest, number), {
+    const timestamp = now()
+    const target = findVersion(latest, number)
+
+    findGeneration(latest, target.generation)!.tasks.push(
+      ...pendingTasks(orders, timestamp),
+    )
+    Object.assign(target, {
       state: 'generating',
       resultIndex: 0,
       taskId: orders.taskIds[0],
-      kieRequest: orders.request,
-      kieRecord: null,
       failReason: null,
-      credits: null,
-      updatedAt: now(),
+      updatedAt: timestamp,
     })
   })
 
@@ -460,10 +468,7 @@ function appendGeneration(
       resultIndex: 0,
       sourceVersion: plan.sourceVersion,
       taskId,
-      kieRequest: orders.request,
-      kieRecord: null,
       failReason: null,
-      credits: null,
       file: null,
       mimeType: null,
       fileSize: null,
@@ -491,10 +496,23 @@ function appendGeneration(
       ({ source: _source, ...reference }) => reference,
     ),
     sourceVersion: plan.sourceVersion,
+    tasks: pendingTasks(orders, timestamp),
     createdAt: timestamp,
   })
 
   return versions
+}
+
+/** kie 接受的任务，终态待收取时记下。 */
+function pendingTasks(orders: Orders, timestamp: string): TaskRecord[] {
+  return orders.taskIds.map((id) => ({
+    id,
+    kieRequest: orders.request,
+    kieRecord: null,
+    credits: null,
+    elapsed: null,
+    createdAt: timestamp,
+  }))
 }
 
 /**

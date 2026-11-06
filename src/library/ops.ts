@@ -40,7 +40,7 @@ export async function importAsset(
     const fileName = versionFileName(1, media.extension)
     const timestamp = now()
     const record: AssetRecord = {
-      schema: 2,
+      schema: 3,
       id: randomUUID(),
       kind: media.kind,
       currentVersion: 1,
@@ -57,10 +57,7 @@ export async function importAsset(
           resultIndex: null,
           sourceVersion: null,
           taskId: null,
-          kieRequest: null,
-          kieRecord: null,
           failReason: null,
-          credits: null,
           file: fileName,
           mimeType: media.mimeType,
           fileSize: bytes.byteLength,

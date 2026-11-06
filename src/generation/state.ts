@@ -1,9 +1,11 @@
 /**
- * 版本状态推进（纯函数，就地修改素材记录）。只有生成中的版本会被推进，重复推进
- * 不产生副作用（幂等）。
+ * 版本与任务的状态推进（纯函数，就地修改素材记录）。只有生成中的版本、尚未记下终态的
+ * 任务会被推进，重复推进不产生副作用（幂等）。
  */
+import { kieUsage } from '../kie/record'
+import type { KieRecord } from '../kie/record'
 import type { AssetRecord, VersionRecord } from '../library/record'
-import { now } from '../library/record'
+import { findTask, now } from '../library/record'
 import { nextCurrentAfterFailure } from '../library/rules'
 
 export type ProductInfo = Pick<
@@ -11,19 +13,25 @@ export type ProductInfo = Pick<
   'file' | 'mimeType' | 'fileSize' | 'width' | 'height' | 'duration'
 >
 
-/** 一个 kie 任务对应的版本里，积分只记在结果序号 0 上，避免重复计量。 */
-function creditsFor(version: VersionRecord, credits: number | null) {
-  return (version.resultIndex ?? 0) === 0 ? credits : null
+/** 记下任务的终态：kie 原始记录、积分与耗时。 */
+export function settleTask(
+  record: AssetRecord,
+  id: string,
+  kieRecord: KieRecord,
+) {
+  const task = findTask(record, id)
+
+  if (!task || task.kieRecord != null) {
+    return
+  }
+
+  Object.assign(task, { kieRecord, ...kieUsage(kieRecord) })
 }
 
 export function failVersion(
   record: AssetRecord,
   number: number,
   reason: string,
-  task: { credits: number | null; kieRecord: unknown } = {
-    credits: null,
-    kieRecord: null,
-  },
 ) {
   const version = record.versions.find((item) => item.number === number)
 
@@ -33,8 +41,6 @@ export function failVersion(
 
   version.state = 'failed'
   version.failReason = reason
-  version.credits = creditsFor(version, task.credits)
-  version.kieRecord = task.kieRecord
   version.updatedAt = now()
 
   // 当前版本失败时顺位到同一次生成里靠后、尚未失败的版本。
@@ -51,7 +57,6 @@ export function fulfillVersion(
   record: AssetRecord,
   number: number,
   product: ProductInfo,
-  task: { credits: number | null; kieRecord: unknown },
 ) {
   const version = record.versions.find((item) => item.number === number)
 
@@ -62,8 +67,6 @@ export function fulfillVersion(
   Object.assign(version, product, {
     state: 'ready',
     failReason: null,
-    credits: creditsFor(version, task.credits),
-    kieRecord: task.kieRecord,
     updatedAt: now(),
   })
 }

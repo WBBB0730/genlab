@@ -109,6 +109,7 @@ function success(urls: string[], credits = 3): Omit<KieRecord, 'taskId'> {
     state: 'success',
     resultJson: JSON.stringify({ resultUrls: urls }),
     creditsConsumed: credits,
+    costTime: 20,
   }
 }
 
@@ -184,8 +185,22 @@ describe('create + sync', () => {
       state: 'ready',
       file: 'v1.png',
       width: 1,
-      credits: 3,
+      taskId: 'task-1',
     })
+    expect(record.generations[0].tasks).toMatchObject([
+      {
+        id: 'task-1',
+        credits: 3,
+        elapsed: 20,
+        kieRecord: { state: 'success' },
+      },
+      {
+        id: 'task-2',
+        credits: 3,
+        elapsed: 20,
+        kieRecord: { state: 'success' },
+      },
+    ])
     expect((await readdir(location.dir)).sort()).toEqual([
       'asset.json',
       'references',
@@ -216,7 +231,7 @@ describe('create + sync', () => {
     })
   })
 
-  it('一个任务返回多个结果：多出来的追加为新版本，积分只记在序号 0', async () => {
+  it('一个任务返回多个结果：多出来的追加为新版本，积分与耗时记在任务上', async () => {
     const kie = fakeKie()
     const location = locateAsset(project, '配乐/主菜单')
 
@@ -243,6 +258,7 @@ describe('create + sync', () => {
         ],
       }),
       creditsConsumed: 12,
+      costTime: 26,
     })
     await syncAssets([location.dir], kie.sync)
 
@@ -253,19 +269,20 @@ describe('create + sync', () => {
       {
         number: 1,
         state: 'ready',
-        credits: 12,
         file: 'v1.wav',
         resultIndex: 0,
       },
       {
         number: 2,
         state: 'ready',
-        credits: null,
         file: 'v2.wav',
         resultIndex: 1,
         position: 1,
         taskId: 'task-1',
       },
+    ])
+    expect(record.generations[0].tasks).toMatchObject([
+      { id: 'task-1', credits: 12, elapsed: 26 },
     ])
   })
 
@@ -610,7 +627,12 @@ describe('迭代', () => {
       { model: 'test/image', params: ['prompt=p'] },
       kie.submit,
     )
-    kie.records.set('task-1', { state: 'fail', failMsg: 'x' })
+    kie.records.set('task-1', {
+      state: 'fail',
+      failMsg: 'x',
+      creditsConsumed: 0,
+      costTime: 5,
+    })
     await syncAssets([location.dir], kie.sync)
 
     await expect(
@@ -624,11 +646,19 @@ describe('迭代', () => {
     expect((await readAsset(location.dir)).versions[0].state).toBe('failed')
 
     expect((await retryVersion(location, 1, kie.submit)).versions).toEqual([1])
-    expect((await readAsset(location.dir)).versions[0]).toMatchObject({
+
+    const record = await readAsset(location.dir)
+
+    expect(record.versions[0]).toMatchObject({
       state: 'generating',
       taskId: 'task-2',
       failReason: null,
     })
+    // 重试前的任务连同积分与耗时保留，新任务追加在后。
+    expect(record.generations[0].tasks).toMatchObject([
+      { id: 'task-1', credits: 0, elapsed: 5 },
+      { id: 'task-2', kieRecord: null, credits: null, elapsed: null },
+    ])
     await expect(retryVersion(location, 1, kie.submit)).rejects.toThrow(
       '只有失败的版本可以重试',
     )

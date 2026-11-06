@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ProjectContext } from '../src/library/context'
-import type { AssetRecord, VersionRecord } from '../src/library/record'
+import type {
+  AssetRecord,
+  TaskRecord,
+  VersionRecord,
+} from '../src/library/record'
 import { presentAsset } from '../src/present'
 
 function version(
@@ -18,10 +22,7 @@ function version(
     resultIndex,
     sourceVersion: null,
     taskId,
-    kieRequest: null,
-    kieRecord: null,
     failReason: null,
-    credits: null,
     file: `v${number}.mp3`,
     mimeType: 'audio/mpeg',
     fileSize: 1,
@@ -34,6 +35,17 @@ function version(
   }
 }
 
+function task(id: string, credits: number | null): TaskRecord {
+  return {
+    id,
+    kieRequest: { model: 'suno/v6', input: {} },
+    kieRecord: null,
+    credits,
+    elapsed: credits == null ? null : 26,
+    createdAt: '',
+  }
+}
+
 const project: ProjectContext = {
   root: '/lib',
   name: 'p',
@@ -41,13 +53,24 @@ const project: ProjectContext = {
 }
 
 const record: AssetRecord = {
-  schema: 2,
+  schema: 3,
   id: 'a',
   kind: 'audio',
   currentVersion: 1,
   lastVersion: 4,
   createdAt: '',
-  generations: [],
+  generations: [
+    {
+      id: 1,
+      model: 'suno/v6',
+      input: {},
+      references: [],
+      sourceVersion: null,
+      // t0 是重试前的任务，已没有版本指向它。
+      tasks: [task('t0', 2), task('t1', 12), task('t2', null)],
+      createdAt: '',
+    },
+  ],
   versions: [
     version(1, 't1', 0),
     version(2, 't1', 1),
@@ -57,41 +80,38 @@ const record: AssetRecord = {
 }
 
 describe('presentAsset', () => {
-  it('指定版本时连同同一任务追加出的版本一起列出', () => {
-    const listed = presentAsset(
+  it('指定版本时连同同一任务追加出的版本一起列出，只列它们所属的任务', () => {
+    const presented = presentAsset(
       project,
       { path: 'a', dir: '/lib/p/a' },
       record,
       [1, 4],
-    ).versions.map((item) => item.version)
+    )
 
-    expect(listed).toEqual([1, 2, 4])
+    expect(presented.versions.map((item) => item.version)).toEqual([1, 2, 4])
+    expect(presented.tasks).toEqual([
+      { taskId: 't1', credits: 12, elapsed: 26 },
+    ])
   })
 
-  it('不指定版本时列出全部', () => {
-    expect(
-      presentAsset(project, { path: 'a', dir: '/lib/p/a' }, record).versions,
-    ).toHaveLength(4)
+  it('不指定版本时列出全部版本与全部任务，含重试前的任务', () => {
+    const presented = presentAsset(
+      project,
+      { path: 'a', dir: '/lib/p/a' },
+      record,
+    )
+
+    expect(presented.versions).toHaveLength(4)
+    expect(presented.tasks).toEqual([
+      { taskId: 't0', credits: 2, elapsed: 26 },
+      { taskId: 't1', credits: 12, elapsed: 26 },
+      { taskId: 't2' },
+    ])
   })
 
-  it('版本带上所属生成的模型', () => {
-    const withGeneration: AssetRecord = {
-      ...record,
-      generations: [
-        {
-          id: 1,
-          model: 'suno/v6',
-          input: {},
-          references: [],
-          sourceVersion: null,
-          createdAt: '',
-        },
-      ],
-    }
-
+  it('版本带上所属生成的模型与任务编号', () => {
     expect(
-      presentAsset(project, { path: 'a', dir: '/lib/p/a' }, withGeneration)
-        .versions[0]?.model,
-    ).toBe('suno/v6')
+      presentAsset(project, { path: 'a', dir: '/lib/p/a' }, record).versions[0],
+    ).toMatchObject({ model: 'suno/v6', taskId: 't1' })
   })
 })

@@ -10,6 +10,7 @@ import writeFileAtomic from 'write-file-atomic'
 
 import { CliError } from '../errors'
 import type { KieTaskRequest } from '../kie/client'
+import { kieUsage } from '../kie/record'
 
 import type { MediaKind } from './media'
 import { ASSET_FILE } from './paths'
@@ -39,6 +40,22 @@ export type GenerationRecord = {
   references: ReferenceRecord[]
   /** AI 编辑 / 重新生成所基于的源版本。 */
   sourceVersion: number | null
+  /** 向 kie 下的任务，含重试新下的任务。 */
+  tasks: TaskRecord[]
+  createdAt: string
+}
+
+export type TaskRecord = {
+  /** kie 的任务编号。 */
+  id: string
+  /** 发给 kie 的原始 createTask 请求体。 */
+  kieRequest: KieTaskRequest
+  /** kie recordInfo 返回的原始任务记录（终态时写入）。 */
+  kieRecord: unknown
+  /** kie 扣除的积分。 */
+  credits: number | null
+  /** 耗时（秒）：kie 从接单到出结果。 */
+  elapsed: number | null
   createdAt: string
 }
 
@@ -52,14 +69,9 @@ export type VersionRecord = {
   /** 取所属 kie 任务结果数组的第几项（Suno 一次多首，其余恒为 0）。 */
   resultIndex: number | null
   sourceVersion: number | null
+  /** 产出这个版本的任务（重试后指向新任务）。 */
   taskId: string | null
-  /** 发给 kie 的原始 createTask 请求体。 */
-  kieRequest: KieTaskRequest | null
-  /** kie recordInfo 返回的原始任务记录（终态时写入）。 */
-  kieRecord: unknown
   failReason: string | null
-  /** kie 扣除的积分；一个任务多个版本时只记在结果序号 0 上。 */
-  credits: number | null
   /** 产物文件名（素材文件夹内）。 */
   file: string | null
   mimeType: string | null
@@ -75,7 +87,7 @@ export type VersionRecord = {
 }
 
 export type AssetRecord = {
-  schema: 2
+  schema: 3
   id: string
   kind: MediaKind
   currentVersion: number
@@ -86,13 +98,32 @@ export type AssetRecord = {
   versions: VersionRecord[]
 }
 
+/** 第 2 版记录格式：任务的请求、原始记录与积分记在版本上，生成里没有任务列表。 */
+type AssetRecordV2 = Omit<
+  AssetRecord,
+  'schema' | 'generations' | 'versions'
+> & {
+  schema: 2
+  generations: Array<Omit<GenerationRecord, 'tasks'>>
+  versions: Array<
+    VersionRecord & {
+      kieRequest: KieTaskRequest | null
+      kieRecord: unknown
+      credits: number | null
+    }
+  >
+}
+
 /** 第 1 版记录格式：没有 lastVersion。 */
-type AssetRecordV1 = Omit<AssetRecord, 'schema' | 'lastVersion'> & {
+type AssetRecordV1 = Omit<AssetRecordV2, 'schema' | 'lastVersion'> & {
   schema: 1
 }
 
-/** 第 1 版记录没记分配过的最大号，只能取现有版本的最大号；下次写入时存为第 2 版。 */
-function upgradeV1({ schema: _schema, ...record }: AssetRecordV1): AssetRecord {
+/** 第 1 版记录没记分配过的最大号，只能取现有版本的最大号。 */
+function upgradeV1({
+  schema: _schema,
+  ...record
+}: AssetRecordV1): AssetRecordV2 {
   return {
     schema: 2,
     ...record,
@@ -103,10 +134,66 @@ function upgradeV1({ schema: _schema, ...record }: AssetRecordV1): AssetRecord {
   }
 }
 
+/**
+ * 第 2 版记录把任务记在版本上：按任务编号归并成所属生成的任务，积分与耗时取自 kie
+ * 原始记录。重试前的任务已被覆盖，无从恢复；下单时间没记，取版本的创建时间。
+ */
+function upgradeV2({
+  schema: _schema,
+  generations,
+  versions,
+  ...record
+}: AssetRecordV2): AssetRecord {
+  const tasks = new Map<string, TaskRecord & { generation: number }>()
+
+  for (const version of versions) {
+    const { taskId, generation, kieRequest, kieRecord } = version
+
+    if (
+      taskId == null ||
+      generation == null ||
+      !kieRequest ||
+      tasks.has(taskId)
+    ) {
+      continue
+    }
+
+    tasks.set(taskId, {
+      generation,
+      id: taskId,
+      kieRequest,
+      kieRecord,
+      ...(kieRecord ? kieUsage(kieRecord) : { credits: null, elapsed: null }),
+      createdAt: version.createdAt,
+    })
+  }
+
+  return {
+    schema: 3,
+    ...record,
+    generations: generations.map(({ createdAt, ...generation }) => ({
+      ...generation,
+      tasks: [...tasks.values()]
+        .filter((task) => task.generation === generation.id)
+        .map(({ generation: _generation, ...task }) => task),
+      createdAt,
+    })),
+    versions: versions.map(
+      ({
+        kieRequest: _kieRequest,
+        kieRecord: _kieRecord,
+        credits: _credits,
+        ...version
+      }) => version,
+    ),
+  }
+}
+
 export function assetFile(assetDir: string): string {
   return path.join(assetDir, ASSET_FILE)
 }
 
+/** 读取素材记录；旧格式升级为当前格式，下次写入时按当前格式保存。 */
 export async function readAsset(assetDir: string): Promise<AssetRecord> {
   let text: string
 
@@ -120,13 +207,17 @@ export async function readAsset(assetDir: string): Promise<AssetRecord> {
     throw error
   }
 
-  const record = JSON.parse(text) as AssetRecord | AssetRecordV1
+  const record = JSON.parse(text) as AssetRecord | AssetRecordV2 | AssetRecordV1
 
   if (record.schema === 1) {
-    return upgradeV1(record)
+    return upgradeV2(upgradeV1(record))
   }
 
-  if (record.schema !== 2) {
+  if (record.schema === 2) {
+    return upgradeV2(record)
+  }
+
+  if (record.schema !== 3) {
     throw new CliError(`无法识别的素材记录版本：${assetFile(assetDir)}`)
   }
 
@@ -185,6 +276,15 @@ export function findGeneration(
   return id == null
     ? undefined
     : record.generations.find((generation) => generation.id === id)
+}
+
+export function findTask(
+  record: AssetRecord,
+  id: string,
+): TaskRecord | undefined {
+  return record.generations
+    .flatMap((generation) => generation.tasks)
+    .find((task) => task.id === id)
 }
 
 export function now(): string {
